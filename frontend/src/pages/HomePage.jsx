@@ -41,6 +41,15 @@ export function HomePage({ onOpenAuth }) {
     }
   }, [initialSearch]);
 
+  // Close product detail modal when authentication modal opens
+  useEffect(() => {
+    const handleAuthOpen = () => {
+      setSelectedProduct(null);
+    };
+    window.addEventListener('khushboo:open_auth', handleAuthOpen);
+    return () => window.removeEventListener('khushboo:open_auth', handleAuthOpen);
+  }, []);
+
   const handleClearSearch = () => {
     setSearchQuery('');
     const newParams = new URLSearchParams(searchParams);

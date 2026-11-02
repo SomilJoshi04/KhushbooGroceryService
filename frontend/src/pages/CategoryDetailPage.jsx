@@ -30,6 +30,15 @@ export function CategoryDetailPage() {
   const [notFound, setNotFound] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState(null);
 
+  // Close product detail modal when authentication modal opens
+  useEffect(() => {
+    const handleAuthOpen = () => {
+      setSelectedProduct(null);
+    };
+    window.addEventListener('khushboo:open_auth', handleAuthOpen);
+    return () => window.removeEventListener('khushboo:open_auth', handleAuthOpen);
+  }, []);
+
   // Fetch Category Details
   useEffect(() => {
     async function loadCategory() {

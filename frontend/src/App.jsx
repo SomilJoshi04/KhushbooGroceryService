@@ -120,9 +120,6 @@ export default function App() {
           <NotificationProvider>
             <StoreSettingsProvider>
               <CartProvider>
-                {/* Authentication Modal (Phone OTP & Admin Login) */}
-                <AuthModal isOpen={isAuthOpen} onClose={() => setIsAuthOpen(false)} />
-
                 {/* Application Routes */}
                 <Routes>
                   {/* Customer Storefront Routes */}
@@ -164,6 +161,9 @@ export default function App() {
                   {/* Fallback Catch-all Route */}
                   <Route path="*" element={<Navigate to="/" replace />} />
                 </Routes>
+
+                {/* Authentication Modal (Phone OTP & Admin Login) - Highest Priority Dialog */}
+                <AuthModal isOpen={isAuthOpen} onClose={() => setIsAuthOpen(false)} />
               </CartProvider>
             </StoreSettingsProvider>
           </NotificationProvider>

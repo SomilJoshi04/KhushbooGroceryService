@@ -128,7 +128,7 @@ export function AuthModal({ isOpen, onClose }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs animate-fadeIn">
+    <div className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-black/55 backdrop-blur-sm animate-fadeIn">
       <div className="relative w-full max-w-md bg-surface border border-border-neutral rounded-2xl shadow-xl p-6 sm:p-8 text-text-main overflow-hidden">
         {/* Close Button */}
         <button

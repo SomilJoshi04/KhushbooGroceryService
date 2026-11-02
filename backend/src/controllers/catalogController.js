@@ -13,7 +13,6 @@ import { Product } from '../models/Product.js';
 import { Banner } from '../models/Banner.js';
 import { User } from '../models/User.js';
 import { deleteFile } from '../services/fileStorageService.js';
-import { ensureGroceryCatalog } from '../services/seedService.js';
 import { AuditLog } from '../models/AuditLog.js';
 import { createNotification } from '../services/notificationService.js';
 
@@ -23,8 +22,6 @@ import { createNotification } from '../services/notificationService.js';
  */
 export async function getCategories(req, res, next) {
   try {
-    await ensureGroceryCatalog();
-
     const categories = await Category.find({ isActive: true })
       .sort({ order: 1, name: 1 })
       .lean();
@@ -46,8 +43,6 @@ export async function getCategories(req, res, next) {
  */
 export async function getProducts(req, res, next) {
   try {
-    await ensureGroceryCatalog();
-
     const query = req.validatedQuery || req.query || {};
     const {
       category,

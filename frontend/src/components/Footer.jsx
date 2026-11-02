@@ -7,13 +7,30 @@
  * @module components/Footer
  */
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { MapPin, Phone, Mail, ShieldCheck, Truck, Clock } from 'lucide-react';
 import { useStoreSettings } from '../context/StoreSettingsContext.jsx';
+import { apiClient } from '../config/api.js';
 
 export function Footer() {
   const { settings } = useStoreSettings();
+  const [popularCategories, setPopularCategories] = useState([]);
+
+  useEffect(() => {
+    let isMounted = true;
+    apiClient
+      .get('/v1/categories')
+      .then((res) => {
+        if (isMounted && Array.isArray(res.data?.data)) {
+          setPopularCategories(res.data.data.slice(0, 5));
+        }
+      })
+      .catch(() => {});
+    return () => {
+      isMounted = false;
+    };
+  }, []);
   return (
     <footer className="bg-surface border-t border-border-neutral text-text-muted text-xs">
       {/* Value Proposition Badges */}
@@ -90,12 +107,14 @@ export function Footer() {
           <div>
             <h4 className="font-bold text-text-main uppercase tracking-wider text-xs mb-3">Popular Departments</h4>
             <ul className="space-y-2 text-xs">
-              <li><Link to="/categories/atta-flour" className="hover:text-brand transition">Wheat Flour & Grains</Link></li>
-              <li><Link to="/categories/besan" className="hover:text-brand transition">Gram Flour</Link></li>
-              <li><Link to="/categories/masale-spices" className="hover:text-brand transition">Spices & Seasonings</Link></li>
-              <li><Link to="/categories/daal-pulses" className="hover:text-brand transition">Pulses & Lentils</Link></li>
-              <li><Link to="/categories/oil-ghee" className="hover:text-brand transition">Cooking Oils & Pure Ghee</Link></li>
-              <li><Link to="/categories" className="text-brand font-semibold hover:underline block pt-0.5">View All →</Link></li>
+              {popularCategories.map((cat) => (
+                <li key={cat._id || cat.slug}>
+                  <Link to={`/categories/${cat.slug}`} className="hover:text-brand transition">
+                    {cat.name}
+                  </Link>
+                </li>
+              ))}
+              <li><Link to="/categories" className="text-brand font-semibold hover:underline block pt-0.5">View All Categories →</Link></li>
             </ul>
           </div>
 

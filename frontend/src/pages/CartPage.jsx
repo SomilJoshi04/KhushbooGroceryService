@@ -93,6 +93,24 @@ export function CartPage({ onOpenAuth }) {
   const [isPincodeServiceable, setIsPincodeServiceable] = useState(true);
   const [pincodeReason, setPincodeReason] = useState('');
   const [matchedZone, setMatchedZone] = useState(null);
+  const [quickCategories, setQuickCategories] = useState([]);
+
+  useEffect(() => {
+    if (cart.length === 0) {
+      let isMounted = true;
+      apiClient
+        .get('/v1/categories')
+        .then((res) => {
+          if (isMounted && Array.isArray(res.data?.data)) {
+            setQuickCategories(res.data.data.slice(0, 4));
+          }
+        })
+        .catch(() => {});
+      return () => {
+        isMounted = false;
+      };
+    }
+  }, [cart.length]);
   const [isZonePaused, setIsZonePaused] = useState(false);
 
   const availableOffers = [
@@ -467,30 +485,27 @@ export function CartPage({ onOpenAuth }) {
         </div>
 
         {/* Popular Category Shortcuts */}
-        <div className="pt-8 border-t border-border-neutral max-w-2xl mx-auto">
-          <p className="text-[11px] font-semibold text-text-muted uppercase tracking-wider mb-4">
-            Popular Grocery Categories
-          </p>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-left">
-            {[
-              { name: 'Wheat Flour & Grains', slug: 'atta-flour', icon: '🌾' },
-              { name: 'Spices & Seasonings', slug: 'masale-spices', icon: '🌶️' },
-              { name: 'Pulses & Lentils', slug: 'daal-pulses', icon: '🥣' },
-              { name: 'Cooking Oils', slug: 'oil-ghee', icon: '🫒' },
-            ].map((cat) => (
-              <Link
-                key={cat.slug}
-                to={`/categories/${cat.slug}`}
-                className="p-3.5 rounded-xl bg-surface hover:bg-surface-subtle border border-border-neutral hover:border-brand/40 transition group flex flex-col justify-between shadow-xs focus:outline-none focus:ring-1 focus:ring-brand"
-              >
-                <span className="text-xl mb-1.5 block">{cat.icon}</span>
-                <span className="text-xs font-bold text-text-main group-hover:text-brand transition">
-                  {cat.name}
-                </span>
-              </Link>
-            ))}
+        {quickCategories.length > 0 && (
+          <div className="pt-8 border-t border-border-neutral max-w-2xl mx-auto">
+            <p className="text-[11px] font-semibold text-text-muted uppercase tracking-wider mb-4">
+              Popular Grocery Categories
+            </p>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-left">
+              {quickCategories.map((cat) => (
+                <Link
+                  key={cat._id || cat.slug}
+                  to={`/categories/${cat.slug}`}
+                  className="p-3.5 rounded-xl bg-surface hover:bg-surface-subtle border border-border-neutral hover:border-brand/40 transition group flex flex-col justify-between shadow-xs focus:outline-none focus:ring-1 focus:ring-brand"
+                >
+                  <span className="text-xl mb-1.5 block">🏷️</span>
+                  <span className="text-xs font-bold text-text-main group-hover:text-brand transition truncate">
+                    {cat.name}
+                  </span>
+                </Link>
+              ))}
+            </div>
           </div>
-        </div>
+        )}
       </div>
     );
   }
@@ -523,30 +538,27 @@ export function CartPage({ onOpenAuth }) {
         </div>
 
         {/* Popular Category Shortcuts */}
-        <div className="pt-8 border-t border-border-neutral max-w-2xl mx-auto">
-          <p className="text-[11px] font-semibold text-text-muted uppercase tracking-wider mb-4">
-            Popular Grocery Categories
-          </p>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-left">
-            {[
-              { name: 'Wheat Flour & Grains', slug: 'atta-flour', icon: '🌾' },
-              { name: 'Spices & Seasonings', slug: 'masale-spices', icon: '🌶️' },
-              { name: 'Pulses & Lentils', slug: 'daal-pulses', icon: '🥣' },
-              { name: 'Cooking Oils', slug: 'oil-ghee', icon: '🫒' },
-            ].map((cat) => (
-              <Link
-                key={cat.slug}
-                to={`/categories/${cat.slug}`}
-                className="p-3.5 rounded-xl bg-surface hover:bg-surface-subtle border border-border-neutral hover:border-brand/40 transition group flex flex-col justify-between shadow-xs focus:outline-none focus:ring-1 focus:ring-brand"
-              >
-                <span className="text-xl mb-1.5 block">{cat.icon}</span>
-                <span className="text-xs font-bold text-text-main group-hover:text-brand transition">
-                  {cat.name}
-                </span>
-              </Link>
-            ))}
+        {quickCategories.length > 0 && (
+          <div className="pt-8 border-t border-border-neutral max-w-2xl mx-auto">
+            <p className="text-[11px] font-semibold text-text-muted uppercase tracking-wider mb-4">
+              Popular Grocery Categories
+            </p>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-left">
+              {quickCategories.map((cat) => (
+                <Link
+                  key={cat._id || cat.slug}
+                  to={`/categories/${cat.slug}`}
+                  className="p-3.5 rounded-xl bg-surface hover:bg-surface-subtle border border-border-neutral hover:border-brand/40 transition group flex flex-col justify-between shadow-xs focus:outline-none focus:ring-1 focus:ring-brand"
+                >
+                  <span className="text-xl mb-1.5 block">🏷️</span>
+                  <span className="text-xs font-bold text-text-main group-hover:text-brand transition truncate">
+                    {cat.name}
+                  </span>
+                </Link>
+              ))}
+            </div>
           </div>
-        </div>
+        )}
       </div>
     );
   }

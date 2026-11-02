@@ -331,7 +331,7 @@ export function Navbar({ onOpenAuth }) {
               type="text"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Search Wheat Flour, Gram Flour, Spices, Pure Oils..."
+              placeholder="Search products & groceries..."
               className="w-full bg-surface border border-border-neutral rounded-xl pl-10 pr-9 py-2 text-xs text-text-main placeholder:text-text-muted focus:outline-none focus:border-brand focus:ring-1 focus:ring-brand transition shadow-xs h-10"
             />
             {searchTerm && (
@@ -533,7 +533,7 @@ export function Navbar({ onOpenAuth }) {
               type="text"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Search Flour, Spices, Pulses..."
+              placeholder="Search products & groceries..."
               className="w-full bg-surface-subtle border border-border-neutral rounded-xl pl-9 pr-8 py-1.5 text-xs text-text-main placeholder:text-text-muted focus:outline-none focus:border-brand shadow-xs h-9"
             />
             {searchTerm && (

@@ -82,6 +82,24 @@ export function CartDrawer({ onOpenAuth }) {
   const [checkoutError, setCheckoutError] = useState('');
   const [isPincodeServiceable, setIsPincodeServiceable] = useState(true);
   const [pincodeReason, setPincodeReason] = useState('');
+  const [quickCategories, setQuickCategories] = useState([]);
+
+  useEffect(() => {
+    if (isCartOpen && cart.length === 0) {
+      let isMounted = true;
+      apiClient
+        .get('/v1/categories')
+        .then((res) => {
+          if (isMounted && Array.isArray(res.data?.data)) {
+            setQuickCategories(res.data.data.slice(0, 4));
+          }
+        })
+        .catch(() => {});
+      return () => {
+        isMounted = false;
+      };
+    }
+  }, [isCartOpen, cart.length]);
 
   // Available Promo Offers to recommend
   const availableOffers = [
@@ -425,36 +443,36 @@ export function CartDrawer({ onOpenAuth }) {
               Add fresh groceries, stone-ground flours, and daily essentials to get started.
             </p>
 
-            {/* Compact Category Shortcuts */}
-            <div className="w-full max-w-xs mb-6">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-text-muted block mb-2">
-                Popular Departments
-              </span>
-              <div className="grid grid-cols-2 gap-1.5">
-                {[
-                  { name: 'Wheat Flour & Grains', slug: 'atta-flour' },
-                  { name: 'Spices & Seasonings', slug: 'masale-spices' },
-                  { name: 'Pulses & Lentils', slug: 'daal-pulses' },
-                  { name: 'Cooking Oils', slug: 'oil-ghee' },
-                ].map((cat) => (
-                  <button
-                    key={cat.slug}
-                    type="button"
-                    onClick={() => handleExploreCategory(cat.slug)}
-                    className="px-2.5 py-1.5 rounded-lg bg-surface hover:bg-surface-subtle border border-border-neutral text-text-main hover:text-brand text-xs font-medium transition flex items-center justify-between shadow-xs"
-                  >
-                    <span>{cat.name}</span>
-                    <ChevronRight className="w-3 h-3 text-text-muted" />
-                  </button>
-                ))}
+            {/* Dynamic Category Shortcuts */}
+            {quickCategories.length > 0 && (
+              <div className="w-full max-w-xs mb-6">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-text-muted block mb-2">
+                  Popular Departments
+                </span>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {quickCategories.map((cat) => (
+                    <button
+                      key={cat._id || cat.slug}
+                      type="button"
+                      onClick={() => handleExploreCategory(cat.slug)}
+                      className="px-2.5 py-1.5 rounded-lg bg-surface hover:bg-surface-subtle border border-border-neutral text-text-main hover:text-brand text-xs font-medium transition flex items-center justify-between shadow-xs"
+                    >
+                      <span className="truncate">{cat.name}</span>
+                      <ChevronRight className="w-3 h-3 text-text-muted shrink-0 ml-1" />
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
 
             <button
-              onClick={() => setIsCartOpen(false)}
+              onClick={() => {
+                setIsCartOpen(false);
+                navigate('/categories');
+              }}
               className="px-6 py-2.5 rounded-xl bg-brand hover:bg-brand-hover text-white font-bold text-xs shadow-xs transition active:scale-95"
             >
-              Continue Shopping
+              Explore All Categories
             </button>
           </div>
         ) : (

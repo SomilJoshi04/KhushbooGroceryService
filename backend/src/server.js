@@ -1,17 +1,17 @@
 /**
- * Express application + server entry point.
- *
- * Startup order (matters):
- * 1. Load and validate environment (exits if invalid).
- * 2. Apply security middleware (helmet, CORS, sanitize, rate limit).
- * 3. Parse request bodies.
- * 4. Mount routes.
- * 5. 404 handler.
- * 6. Centralized error handler.
- * 7. Connect to MongoDB.
- * 8. Start listening.
- * 9. Register graceful-shutdown handlers.
- *
+ 
+
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+
  * @module server
  */
 
