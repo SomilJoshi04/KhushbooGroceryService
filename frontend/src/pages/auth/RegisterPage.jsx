@@ -45,7 +45,7 @@ export function RegisterPage() {
   // Redirect if already logged in
   React.useEffect(() => {
     if (isAuthenticated) {
-      navigate('/account', { replace: true });
+      navigate('/', { replace: true });
     }
   }, [isAuthenticated, navigate]);
 

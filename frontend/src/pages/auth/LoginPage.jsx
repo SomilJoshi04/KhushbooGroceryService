@@ -35,7 +35,7 @@ export function LoginPage() {
       if (isAdmin) {
         navigate('/admin/dashboard', { replace: true });
       } else {
-        const from = location.state?.from?.pathname || '/account';
+        const from = location.state?.from?.pathname || '/';
         navigate(from, { replace: true });
       }
     }
@@ -49,7 +49,7 @@ export function LoginPage() {
 
     try {
       await login(identifier, password, rememberMe);
-      const from = location.state?.from?.pathname || '/account';
+      const from = location.state?.from?.pathname || '/';
       navigate(from, { replace: true });
     } catch (err) {
       const msg = err.message || 'Invalid credentials. Please try again.';

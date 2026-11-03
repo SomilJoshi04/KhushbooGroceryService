@@ -74,7 +74,7 @@ export function AuthModal({ isOpen, onClose }) {
     try {
       await login(identifier, password, rememberMe);
       onClose();
-      navigate('/account');
+      navigate('/');
     } catch (err) {
       const msg = err.message || 'Invalid email/username or password.';
       setError(msg);
