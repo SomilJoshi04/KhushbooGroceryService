@@ -11,7 +11,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { apiClient } from '../config/api.js';
+import { apiClient, resolveImageUrl, getApiUploadUrl, NEUTRAL_PRODUCT_PLACEHOLDER } from '../config/api.js';
 import { Search, Grid, ArrowRight, RefreshCw } from 'lucide-react';
 import { SkeletonCategoryGrid } from '../components/skeleton/index.js';
 import { swrCache } from '../utils/swrCache.js';
@@ -136,12 +136,20 @@ export function CategoriesPage() {
                 {/* Category Image */}
                 <div className="relative aspect-4/3 w-full bg-surface-subtle overflow-hidden border-b border-border-neutral">
                   <img
-                    src={category.image || 'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=600&q=80'}
+                    src={resolveImageUrl(category.image) || NEUTRAL_PRODUCT_PLACEHOLDER}
                     alt={category.name}
                     className="w-full h-full object-cover group-hover:scale-102 transition duration-500"
                     loading="lazy"
                     onError={(e) => {
-                      e.currentTarget.src = 'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=600&q=80';
+                      if (!e.currentTarget.dataset.fallbackAttempted && category.image) {
+                        e.currentTarget.dataset.fallbackAttempted = 'true';
+                        const apiFallback = getApiUploadUrl(category.image);
+                        if (apiFallback && e.currentTarget.src !== apiFallback) {
+                          e.currentTarget.src = apiFallback;
+                          return;
+                        }
+                      }
+                      e.currentTarget.src = NEUTRAL_PRODUCT_PLACEHOLDER;
                     }}
                   />
                   <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between">

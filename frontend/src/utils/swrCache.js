@@ -154,7 +154,7 @@ class SWRCacheManager {
             }
           });
         }
-      } catch {}
+      } catch { }
       return;
     }
 
@@ -167,7 +167,7 @@ class SWRCacheManager {
           if (typeof window !== 'undefined' && window.sessionStorage) {
             window.sessionStorage.removeItem(`kgs_swr_${key}`);
           }
-        } catch {}
+        } catch { }
       }
     }
   }

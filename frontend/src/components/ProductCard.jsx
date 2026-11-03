@@ -106,10 +106,7 @@ export function ProductCard({ product, onOpenDetails, priority = false }) {
       <div className="relative aspect-square w-full bg-surface-subtle overflow-hidden shrink-0 border-b border-border-neutral">
         <ImageWithSkeleton
           imgRef={imageRef}
-          src={
-            product.images?.[0] ||
-            'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=400&q=80'
-          }
+          src={product.images?.[0]}
           alt={product.name}
           className="w-full h-full object-cover group-hover:scale-102 transition duration-300"
           priority={priority}

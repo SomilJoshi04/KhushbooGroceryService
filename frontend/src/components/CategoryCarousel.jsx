@@ -14,6 +14,7 @@ import React, { useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, ArrowRight } from 'lucide-react';
 import { SkeletonCategoryCarousel } from './skeleton/index.js';
+import { resolveImageUrl, getApiUploadUrl, NEUTRAL_PRODUCT_PLACEHOLDER } from '../config/api.js';
 
 export function CategoryCarousel({
   categories = [],
@@ -146,16 +147,20 @@ export function CategoryCarousel({
                 }`}
               >
                 <img
-                  src={
-                    cat.image ||
-                    'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=200&q=80'
-                  }
+                  src={resolveImageUrl(cat.image) || NEUTRAL_PRODUCT_PLACEHOLDER}
                   alt={cat.name}
                   loading="lazy"
                   className="w-full h-full object-cover rounded-[10px] bg-surface-subtle"
                   onError={(e) => {
-                    e.currentTarget.src =
-                      'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=200&q=80';
+                    if (!e.currentTarget.dataset.fallbackAttempted) {
+                      e.currentTarget.dataset.fallbackAttempted = 'true';
+                      const apiFallback = getApiUploadUrl(cat.image);
+                      if (apiFallback) {
+                        e.currentTarget.src = apiFallback;
+                        return;
+                      }
+                    }
+                    e.currentTarget.src = NEUTRAL_PRODUCT_PLACEHOLDER;
                   }}
                 />
               </div>

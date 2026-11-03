@@ -40,7 +40,7 @@ import {
 import { useCart } from '../context/CartContext.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useStoreSettings } from '../context/StoreSettingsContext.jsx';
-import { apiClient } from '../config/api.js';
+import { apiClient, resolveImageUrl, getApiUploadUrl, NEUTRAL_PRODUCT_PLACEHOLDER } from '../config/api.js';
 import { LocationPickerModal } from '../components/map/LocationPickerModal.jsx';
 
 export function CartPage({ onOpenAuth }) {
@@ -668,12 +668,19 @@ export function CartPage({ onOpenAuth }) {
                       {/* Product Info with Image */}
                       <div className="flex items-center gap-3.5 min-w-0 flex-1">
                         <img
-                          src={item.image}
+                          src={resolveImageUrl(item.image) || NEUTRAL_PRODUCT_PLACEHOLDER}
                           alt={item.name}
                           className="w-16 h-16 sm:w-18 sm:h-18 rounded-lg object-cover shrink-0 bg-surface-subtle border border-border-neutral"
                           onError={(e) => {
-                            e.target.src =
-                              'https://images.unsplash.com/photo-1542838132-92c53300491e?w=400&auto=format&fit=crop&q=80';
+                            if (!e.currentTarget.dataset.fallbackAttempted && item.image) {
+                              e.currentTarget.dataset.fallbackAttempted = 'true';
+                              const apiFallback = getApiUploadUrl(item.image);
+                              if (apiFallback && e.currentTarget.src !== apiFallback) {
+                                e.currentTarget.src = apiFallback;
+                                return;
+                              }
+                            }
+                            e.currentTarget.src = NEUTRAL_PRODUCT_PLACEHOLDER;
                           }}
                         />
                         <div className="min-w-0 flex-1">

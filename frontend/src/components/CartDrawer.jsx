@@ -33,6 +33,7 @@ import {
 import { useCart } from '../context/CartContext.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useStoreSettings } from '../context/StoreSettingsContext.jsx';
+import { resolveImageUrl, getApiUploadUrl, NEUTRAL_PRODUCT_PLACEHOLDER } from '../config/api.js';
 import { apiClient } from '../config/api.js';
 
 export function CartDrawer({ onOpenAuth }) {
@@ -521,12 +522,19 @@ export function CartDrawer({ onOpenAuth }) {
                       className="p-3 bg-surface border border-border-neutral rounded-xl flex gap-3 items-center hover:border-brand/40 transition shadow-xs"
                     >
                       <img
-                        src={item.image}
+                        src={resolveImageUrl(item.image) || NEUTRAL_PRODUCT_PLACEHOLDER}
                         alt={item.name}
                         className="w-14 h-14 rounded-lg object-cover shrink-0 bg-surface-subtle border border-border-neutral"
                         onError={(e) => {
-                          e.currentTarget.src =
-                            'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=400&q=80';
+                          if (!e.currentTarget.dataset.fallbackAttempted) {
+                            e.currentTarget.dataset.fallbackAttempted = 'true';
+                            const apiFallback = getApiUploadUrl(item.image);
+                            if (apiFallback) {
+                              e.currentTarget.src = apiFallback;
+                              return;
+                            }
+                          }
+                          e.currentTarget.src = NEUTRAL_PRODUCT_PLACEHOLDER;
                         }}
                       />
 

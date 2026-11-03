@@ -503,9 +503,7 @@ export function CartProvider({ children }) {
 
     const newItem = {
       id,
-      imageUrl:
-        imageUrl ||
-        'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=150&q=80',
+      imageUrl: imageUrl || '',
       startX,
       startY,
       initialSize,

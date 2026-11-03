@@ -176,10 +176,7 @@ export function ProductDetailModal({ product, isOpen, onClose }) {
             <div className="relative w-full max-h-52 sm:max-h-64 md:max-h-none aspect-square bg-surface-subtle border border-border-neutral rounded-xl overflow-hidden flex items-center justify-center">
               <ImageWithSkeleton
                 imgRef={imageRef}
-                src={
-                  product.images?.[0] ||
-                  'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=600&q=80'
-                }
+                src={product.images?.[0]}
                 alt={product.name}
                 className="w-full h-full object-cover"
                 loading="eager"

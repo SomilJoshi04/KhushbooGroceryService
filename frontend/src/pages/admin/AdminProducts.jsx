@@ -9,7 +9,7 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
-import { apiClient } from '../../config/api.js';
+import { apiClient, resolveImageUrl, getApiUploadUrl, NEUTRAL_PRODUCT_PLACEHOLDER } from '../../config/api.js';
 import {
   ShoppingBag,
   Plus,
@@ -55,7 +55,7 @@ export function AdminProducts() {
     description: '',
     category: '',
     brand: 'Khushboo Pure',
-    images: ['https://images.unsplash.com/photo-1509440159596-0249088772ff?auto=format&fit=crop&w=600&q=80'],
+    images: [],
     isVeg: true,
     isPublished: true,
     variants: [
@@ -207,7 +207,7 @@ export function AdminProducts() {
       description: '',
       category: categories[0]?._id || '',
       brand: 'Khushboo Pure',
-      images: ['https://images.unsplash.com/photo-1509440159596-0249088772ff?auto=format&fit=crop&w=600&q=80'],
+      images: [],
       isVeg: true,
       isPublished: true,
       variants: [
@@ -235,7 +235,7 @@ export function AdminProducts() {
       description: prod.description || '',
       category: prod.category?._id || prod.category || '',
       brand: prod.brand || 'Khushboo Pure',
-      images: prod.images || ['https://images.unsplash.com/photo-1509440159596-0249088772ff?auto=format&fit=crop&w=600&q=80'],
+      images: Array.isArray(prod.images) ? prod.images : [],
       isVeg: prod.isVeg ?? true,
       isPublished: prod.isPublished ?? true,
       variants: prod.variants?.map((v) => ({
@@ -564,9 +564,20 @@ export function AdminProducts() {
                       </td>
                       <td className="p-4 flex items-center gap-3">
                         <img
-                          src={p.images?.[0] || 'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=150&q=80'}
+                          src={resolveImageUrl(p.images?.[0]) || NEUTRAL_PRODUCT_PLACEHOLDER}
                           alt={p.name}
                           className="w-12 h-12 rounded-xl object-cover bg-surface-subtle border border-border-neutral shrink-0"
+                          onError={(e) => {
+                            if (!e.currentTarget.dataset.fallbackAttempted) {
+                              e.currentTarget.dataset.fallbackAttempted = 'true';
+                              const apiFallback = getApiUploadUrl(p.images?.[0]);
+                              if (apiFallback) {
+                                e.currentTarget.src = apiFallback;
+                                return;
+                              }
+                            }
+                            e.currentTarget.src = NEUTRAL_PRODUCT_PLACEHOLDER;
+                          }}
                         />
                         <div>
                           <span className="font-bold text-text-main block max-w-xs truncate">{p.name}</span>
@@ -800,6 +811,7 @@ export function AdminProducts() {
                     label="Product Primary Image"
                     hint="Select image from device (JPEG, PNG, WebP up to 5 MB), drag & drop, or provide URL."
                     required={true}
+                    uploadFolder="products"
                   />
                 </div>
 

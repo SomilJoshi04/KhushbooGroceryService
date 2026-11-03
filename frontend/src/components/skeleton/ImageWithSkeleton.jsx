@@ -14,9 +14,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { SkeletonBase } from './SkeletonBase.jsx';
-
-const DEFAULT_FALLBACK_IMAGE =
-  'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=600&q=80';
+import { resolveImageUrl, getApiUploadUrl, NEUTRAL_PRODUCT_PLACEHOLDER } from '../../config/api.js';
 
 export function ImageWithSkeleton({
   src,
@@ -24,7 +22,7 @@ export function ImageWithSkeleton({
   className = '',
   containerClassName = '',
   aspectRatio = 'aspect-square',
-  fallbackSrc = DEFAULT_FALLBACK_IMAGE,
+  fallbackSrc = NEUTRAL_PRODUCT_PLACEHOLDER,
   loading = 'lazy',
   priority = false,
   decoding = 'async',
@@ -36,12 +34,19 @@ export function ImageWithSkeleton({
 }) {
   const [isLoaded, setIsLoaded] = useState(false);
   const [hasError, setHasError] = useState(false);
-  const [imageSrc, setImageSrc] = useState(src || fallbackSrc);
+  const resolvedInitialSrc = resolveImageUrl(src) || fallbackSrc;
+  const [imageSrc, setImageSrc] = useState(resolvedInitialSrc);
   const internalRef = useRef(null);
+  const fallbackAttemptedRef = useRef(false);
+  const prevSrcRef = useRef(src);
 
   // Sync internal image src if src prop changes
   useEffect(() => {
-    setImageSrc(src || fallbackSrc);
+    if (prevSrcRef.current !== src) {
+      prevSrcRef.current = src;
+      fallbackAttemptedRef.current = false;
+    }
+    setImageSrc(resolveImageUrl(src) || fallbackSrc);
     setIsLoaded(false);
     setHasError(false);
   }, [src, fallbackSrc]);
@@ -62,6 +67,16 @@ export function ImageWithSkeleton({
   };
 
   const handleImageError = (e) => {
+    // Attempt one-time failover via /api/v1/uploads if direct /uploads route returned 404 or index.html
+    if (!fallbackAttemptedRef.current) {
+      fallbackAttemptedRef.current = true;
+      const apiFallback = getApiUploadUrl(src);
+      if (apiFallback) {
+        setImageSrc(apiFallback);
+        return;
+      }
+    }
+
     setHasError(true);
     setIsLoaded(true); // Stop skeleton on error
     if (imageSrc !== fallbackSrc) {

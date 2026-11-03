@@ -39,7 +39,7 @@ import {
   Layers,
   ArrowRight,
 } from 'lucide-react';
-import { apiClient } from '../../config/api.js';
+import { apiClient, resolveImageUrl, getApiUploadUrl, NEUTRAL_BANNER_PLACEHOLDER } from '../../config/api.js';
 import { ImageUpload } from '../../components/common/ImageUpload.jsx';
 import { Pagination } from '../../components/Pagination.jsx';
 import { useBulkSelection } from '../../hooks/useBulkSelection.js';
@@ -628,12 +628,19 @@ export function AdminBanners() {
                         title="Click to view full preview"
                       >
                         <img
-                          src={b.desktopImage}
+                          src={resolveImageUrl(b.desktopImage)}
                           alt={b.title}
                           className="w-full h-full object-cover group-hover:scale-105 transition-transform"
                           onError={(e) => {
-                            e.currentTarget.src =
-                              'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=300&q=80';
+                            if (!e.currentTarget.dataset.fallbackAttempted) {
+                              e.currentTarget.dataset.fallbackAttempted = 'true';
+                              const apiFallback = getApiUploadUrl(b.desktopImage);
+                              if (apiFallback) {
+                                e.currentTarget.src = apiFallback;
+                                return;
+                              }
+                            }
+                            e.currentTarget.src = NEUTRAL_BANNER_PLACEHOLDER;
                           }}
                         />
                         <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition text-white">
@@ -923,6 +930,7 @@ export function AdminBanners() {
                     label="Desktop Banner Image"
                     hint="Recommended: 1200x600px or 16:9 ratio. Drag & drop or select file."
                     required={true}
+                    uploadFolder="banners"
                   />
                 </div>
 
@@ -937,6 +945,7 @@ export function AdminBanners() {
                     label="Mobile Banner Image"
                     hint="Optional portrait or square image optimized for phone screens (e.g. 600x600px)."
                     required={false}
+                    uploadFolder="banners"
                   />
                 </div>
 
@@ -1117,7 +1126,7 @@ export function AdminBanners() {
                       </div>
                       <div className="w-full md:w-48 h-32 rounded-xl overflow-hidden border border-border-neutral bg-surface-subtle shrink-0">
                         <img
-                          src={formData.desktopImage}
+                          src={resolveImageUrl(formData.desktopImage)}
                           alt="Preview"
                           className="w-full h-full object-cover"
                         />
@@ -1235,11 +1244,11 @@ export function AdminBanners() {
                   </div>
                   <div className={`${previewDevice === 'mobile' ? 'w-[42%]' : 'w-[52%]'} h-full relative bg-surface-subtle overflow-hidden`}>
                     <img
-                      src={
+                      src={resolveImageUrl(
                         previewDevice === 'mobile' && previewBanner.mobileImage
                           ? previewBanner.mobileImage
                           : previewBanner.desktopImage
-                      }
+                      )}
                       alt={previewBanner.title}
                       className="w-full h-full object-cover object-center pointer-events-none"
                     />

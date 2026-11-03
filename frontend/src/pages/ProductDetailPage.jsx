@@ -17,7 +17,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { apiClient } from '../config/api.js';
+import { apiClient, resolveImageUrl, getApiUploadUrl, NEUTRAL_PRODUCT_PLACEHOLDER } from '../config/api.js';
 import { useCart, getCartItemKey } from '../context/CartContext.jsx';
 import { SkeletonProductDetail } from '../components/skeleton/index.js';
 import {
@@ -199,14 +199,22 @@ export function ProductDetailPage() {
               <img
                 ref={imageRef}
                 src={
-                  product.images?.[0] ||
-                  'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=800&q=80'
+                  resolveImageUrl(product.images?.[0]) ||
+                  NEUTRAL_PRODUCT_PLACEHOLDER
                 }
                 alt={product.name}
                 className="w-full h-full object-cover"
                 onError={(e) => {
-                  e.currentTarget.src =
-                    'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=800&q=80';
+                  const rawImg = product.images?.[0];
+                  if (!e.currentTarget.dataset.fallbackAttempted && rawImg) {
+                    e.currentTarget.dataset.fallbackAttempted = 'true';
+                    const apiFallback = getApiUploadUrl(rawImg);
+                    if (apiFallback && e.currentTarget.src !== apiFallback) {
+                      e.currentTarget.src = apiFallback;
+                      return;
+                    }
+                  }
+                  e.currentTarget.src = NEUTRAL_PRODUCT_PLACEHOLDER;
                 }}
               />
               {hasDiscount && (

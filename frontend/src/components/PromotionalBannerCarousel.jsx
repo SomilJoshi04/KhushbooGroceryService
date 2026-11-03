@@ -19,12 +19,11 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, ArrowRight, Sparkles } from 'lucide-react';
-import { apiClient } from '../config/api.js';
+import { apiClient, resolveImageUrl, getApiUploadUrl, NEUTRAL_BANNER_PLACEHOLDER } from '../config/api.js';
 import { SkeletonBanner } from './skeleton/index.js';
 import { swrCache } from '../utils/swrCache.js';
 
-const FALLBACK_BANNER_IMAGE =
-  'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=1200&q=80';
+const FALLBACK_BANNER_IMAGE = NEUTRAL_BANNER_PLACEHOLDER;
 
 export function PromotionalBannerCarousel({ className = '' }) {
   const cachedBanners = swrCache.get('banners');
@@ -191,15 +190,23 @@ export function PromotionalBannerCarousel({ className = '' }) {
           <div className="w-[42%] sm:w-[45%] md:w-[52%] lg:w-[54%] h-full relative overflow-hidden bg-surface-subtle">
             <picture className="w-full h-full block">
               {currentBanner.mobileImage && (
-                <source media="(max-width: 767px)" srcSet={currentBanner.mobileImage} />
+                <source media="(max-width: 767px)" srcSet={resolveImageUrl(currentBanner.mobileImage)} />
               )}
               <img
                 key={currentBanner._id || currentIndex}
-                src={currentBanner.desktopImage}
+                src={resolveImageUrl(currentBanner.desktopImage)}
                 alt={currentBanner.title}
                 loading="lazy"
                 className="w-full h-full object-cover object-center block pointer-events-none transition-opacity duration-300"
                 onError={(e) => {
+                  if (!e.currentTarget.dataset.fallbackAttempted) {
+                    e.currentTarget.dataset.fallbackAttempted = 'true';
+                    const apiFallback = getApiUploadUrl(currentBanner.desktopImage);
+                    if (apiFallback) {
+                      e.currentTarget.src = apiFallback;
+                      return;
+                    }
+                  }
                   e.currentTarget.src = FALLBACK_BANNER_IMAGE;
                 }}
               />

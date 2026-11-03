@@ -236,28 +236,61 @@ app.get('/ready', (_req, res) => {
 const uploadsDir = path.resolve(__dirname, '../uploads');
 
 // Strict access control: Prohibit direct static access to private documents & temporary staging
-app.use(['/uploads/documents', '/uploads/temporary'], (req, res) => {
-  return res.status(403).json({
-    success: false,
-    message: 'Direct static access to private storage is prohibited. Use authenticated API endpoints.',
-  });
+// Hardened against URI-encoded variations (%64ocuments, etc.), uppercase paths (/UPLOADS/documents), and directory traversal attacks
+// Protects: '/uploads/documents', '/api/v1/uploads/documents', '/api/uploads/documents'
+const privateUploadDirs = ['/documents', '/temporary'];
+const uploadPrefixes = ['/uploads', '/api/v1/uploads', '/api/uploads'];
+
+app.use((req, res, next) => {
+  let decodedPath = '';
+  try {
+    decodedPath = decodeURIComponent(req.originalUrl.split('?')[0]).replace(/\\/g, '/');
+  } catch (_e) {
+    return res.status(400).json({ success: false, message: 'Invalid URL encoding' });
+  }
+
+  const lowerPath = decodedPath.toLowerCase();
+  const matchedPrefix = uploadPrefixes.find(
+    (prefix) => lowerPath === prefix || lowerPath.startsWith(prefix + '/')
+  );
+
+  if (matchedPrefix) {
+    const rawSub = lowerPath.slice(matchedPrefix.length);
+    const normalizedSub = path.posix.normalize(rawSub).toLowerCase();
+
+    const pathSegments = normalizedSub.split('/').filter(Boolean);
+
+    if (
+      privateUploadDirs.some((dir) => pathSegments.includes(dir.slice(1)))
+    ) {
+      return res.status(403).json({
+        success: false,
+        message: 'Direct static access to private storage is prohibited. Use authenticated API endpoints.',
+      });
+    }
+  }
+
+  next();
 });
 
-// Serve public uploads securely with long-term immutable browser caching, CORP, and nosniff headers
-app.use(
-  '/uploads',
-  express.static(uploadsDir, {
-    etag: true,
-    lastModified: true,
-    maxAge: '30d',
-    setHeaders: (res, filePath) => {
-      res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
-      // Immutable caching for UUID-addressed files
-      res.setHeader('Cache-Control', 'public, max-age=2592000, immutable');
-      res.setHeader('X-Content-Type-Options', 'nosniff');
-    },
-  })
-);
+// Serve public uploads securely with long-term immutable browser caching, CORP, and nosniff headers.
+// Mounted at /uploads as well as /api/v1/uploads and /api/uploads so that environments where
+// Nginx only reverse-proxies /api to Node.js can still reliably serve uploads.
+const publicUploadsStaticMiddleware = express.static(uploadsDir, {
+  etag: true,
+  lastModified: true,
+  maxAge: '30d',
+  setHeaders: (res) => {
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+    // Immutable caching for UUID-addressed files
+    res.setHeader('Cache-Control', 'public, max-age=2592000, immutable');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+  },
+});
+
+app.use('/uploads', publicUploadsStaticMiddleware);
+app.use('/api/v1/uploads', publicUploadsStaticMiddleware);
+app.use('/api/uploads', publicUploadsStaticMiddleware);
 
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/delivery', deliveryRoutes);

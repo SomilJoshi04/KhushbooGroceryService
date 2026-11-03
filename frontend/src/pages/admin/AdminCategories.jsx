@@ -24,6 +24,7 @@ import {
 import { ImageUpload } from '../../components/common/ImageUpload.jsx';
 import { SkeletonCategoryGrid } from '../../components/skeleton/index.js';
 import { swrCache } from '../../utils/swrCache.js';
+import { resolveImageUrl, getApiUploadUrl, NEUTRAL_PRODUCT_PLACEHOLDER } from '../../config/api.js';
 
 export function AdminCategories() {
   const [categories, setCategories] = useState([]);
@@ -70,7 +71,7 @@ export function AdminCategories() {
       name: '',
       slug: '',
       description: '',
-      image: 'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=600&q=80',
+      image: '',
       order: categories.length + 1,
       isActive: true,
     });
@@ -178,9 +179,20 @@ export function AdminCategories() {
             >
               <div className="relative aspect-4/3 w-full bg-surface-subtle overflow-hidden">
                 <img
-                  src={cat.image || 'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=300&q=80'}
+                  src={resolveImageUrl(cat.image) || NEUTRAL_PRODUCT_PLACEHOLDER}
                   alt={cat.name}
                   className="w-full h-full object-cover"
+                  onError={(e) => {
+                    if (!e.currentTarget.dataset.fallbackAttempted) {
+                      e.currentTarget.dataset.fallbackAttempted = 'true';
+                      const apiFallback = getApiUploadUrl(cat.image);
+                      if (apiFallback) {
+                        e.currentTarget.src = apiFallback;
+                        return;
+                      }
+                    }
+                    e.currentTarget.src = NEUTRAL_PRODUCT_PLACEHOLDER;
+                  }}
                 />
                 <div className="absolute top-3 left-3 bg-surface/90 backdrop-blur-xs px-2 py-0.5 rounded-lg border border-border-neutral text-[10px] font-mono text-brand font-semibold shadow-xs">
                   Order #{cat.order}
@@ -296,6 +308,7 @@ export function AdminCategories() {
                   label="Department Banner / Thumbnail"
                   hint="Select category thumbnail from device (JPEG, PNG, WebP up to 5 MB), or enter URL."
                   required={true}
+                  uploadFolder="categories"
                 />
               </div>
 

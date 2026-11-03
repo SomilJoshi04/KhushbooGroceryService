@@ -11,6 +11,7 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
+import { resolveImageUrl, NEUTRAL_PRODUCT_PLACEHOLDER } from '../config/api.js';
 
 export function CartFlyingOverlay({ flyingItems, onComplete }) {
   if (typeof document === 'undefined') return null;
@@ -68,12 +69,11 @@ export function CartFlyingOverlay({ flyingItems, onComplete }) {
               }}
             >
               <img
-                src={item.imageUrl}
+                src={resolveImageUrl(item.imageUrl) || NEUTRAL_PRODUCT_PLACEHOLDER}
                 alt=""
                 className="w-full h-full object-cover rounded-lg"
                 onError={(e) => {
-                  e.currentTarget.src =
-                    'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=150&q=80';
+                  e.currentTarget.src = NEUTRAL_PRODUCT_PLACEHOLDER;
                 }}
               />
             </motion.div>

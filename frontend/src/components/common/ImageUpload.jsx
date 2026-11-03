@@ -13,9 +13,9 @@
  * @module components/common/ImageUpload
  */
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { UploadCloud, Image as ImageIcon, X, CheckCircle2, AlertCircle, RefreshCw, Link as LinkIcon, FileCheck } from 'lucide-react';
-import { apiClient } from '../../config/api.js';
+import { apiClient, resolveImageUrl, getApiUploadUrl } from '../../config/api.js';
 
 export function ImageUpload({
   value = '',
@@ -24,6 +24,13 @@ export function ImageUpload({
   hint = 'Recommended: 800x800px or 1:1 square. Max 5 MB (JPEG, PNG, WebP).',
   required = false,
   className = '',
+  /**
+   * Upload subfolder on the VPS: 'products' | 'categories' | 'banners' | 'customers' | 'admin'.
+   * If provided, the image is POSTed to /v1/upload/{folder} (e.g. /v1/upload/banners) which stores
+   * it in the dedicated subfolder (/uploads/banners/) instead of the generic /uploads/products/.
+   * If omitted, falls back to the general /v1/upload/image endpoint (products subfolder).
+   */
+  uploadFolder = '',
 }) {
   const [isDragging, setIsDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -32,8 +39,20 @@ export function ImageUpload({
   const [success, setSuccess] = useState('');
   const [mode, setMode] = useState('upload'); // 'upload' | 'url'
   const [manualUrl, setManualUrl] = useState(value || '');
+  const [imageLoadFailed, setImageLoadFailed] = useState(false);
 
   const fileInputRef = useRef(null);
+  const fallbackAttemptedRef = useRef(false);
+
+  // Reset one-time fallback tracking and error state when the image value changes
+  useEffect(() => {
+    fallbackAttemptedRef.current = false;
+    setImageLoadFailed(false);
+  }, [value]);
+
+  // Allowlist for dedicated storage subfolders
+  const ALLOWED_UPLOAD_FOLDERS = ['products', 'categories', 'banners'];
+  const safeFolder = ALLOWED_UPLOAD_FOLDERS.includes(uploadFolder) ? uploadFolder : '';
 
   // Validate file size and mime before uploading
   const validateFile = (file) => {
@@ -66,7 +85,11 @@ export function ImageUpload({
 
     try {
       setProgress(45);
-      const res = await apiClient.post('/v1/upload/image', formData, {
+      // Dedicated upload endpoints for validated folders; fall back to general /v1/upload/image
+      const uploadEndpoint = safeFolder
+        ? `/v1/upload/${safeFolder}`
+        : '/v1/upload/image';
+      const res = await apiClient.post(uploadEndpoint, formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
         onUploadProgress: (progressEvent) => {
           if (progressEvent.total) {
@@ -84,10 +107,12 @@ export function ImageUpload({
         setSuccess('Image uploaded and secured successfully!');
         setTimeout(() => setSuccess(''), 3500);
       } else {
-        setError(res.data?.message || 'Upload failed. Please try again.');
+        // Preserve previous image on failure
+        setError(res.data?.message || 'Upload failed. Previous image was retained.');
       }
     } catch (err) {
-      const serverMsg = err.response?.data?.message || err.message || 'Network error during upload.';
+      // Preserve previous image on error
+      const serverMsg = err.response?.data?.message || err.message || 'Network error during upload. Previous image was retained.';
       setError(serverMsg);
     } finally {
       setUploading(false);
@@ -146,8 +171,22 @@ export function ImageUpload({
     setTimeout(() => setSuccess(''), 3000);
   };
 
-  // Resolve preview image URL: if relative /uploads/..., use as is
-  const previewUrl = value;
+  // Resolve preview image URL using centralized resolver
+  const previewUrl = resolveImageUrl(value);
+
+  const handleImageError = (e) => {
+    // Only attempt the API proxy fallback once per image value
+    if (!fallbackAttemptedRef.current) {
+      fallbackAttemptedRef.current = true;
+      const apiFallback = getApiUploadUrl(value);
+      if (apiFallback && apiFallback !== previewUrl && apiFallback !== e.currentTarget.src) {
+        e.currentTarget.src = apiFallback;
+        return;
+      }
+    }
+    setImageLoadFailed(true);
+    setError('File saved on server, but browser could not render preview. Verify Nginx /uploads proxy.');
+  };
 
   return (
     <div className={`space-y-2 ${className}`}>
@@ -208,15 +247,21 @@ export function ImageUpload({
             {previewUrl ? (
               <div className="relative group w-full flex items-center justify-center">
                 <div className="relative max-h-48 max-w-full rounded-xl overflow-hidden shadow-xs border border-border-neutral bg-white p-1">
-                  <img
-                    src={previewUrl}
-                    alt="Uploaded preview"
-                    className="max-h-40 max-w-full object-contain rounded-lg mx-auto"
-                    onError={(e) => {
-                      e.currentTarget.src =
-                        'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=400&q=80';
-                    }}
-                  />
+                  {imageLoadFailed ? (
+                    <div className="w-48 h-32 flex flex-col items-center justify-center p-3 text-center bg-surface-subtle text-text-muted rounded-lg border border-dashed border-border-neutral">
+                      <AlertCircle className="w-6 h-6 text-status-error mb-1 shrink-0" />
+                      <span className="text-xs font-semibold text-text-main">Preview Unavailable</span>
+                      <span className="text-[10px] text-text-muted mt-0.5 max-w-[170px] truncate">{value}</span>
+                    </div>
+                  ) : (
+                    <img
+                      key={previewUrl}
+                      src={previewUrl}
+                      alt="Uploaded preview"
+                      className="max-h-40 max-w-full object-contain rounded-lg mx-auto"
+                      onError={handleImageError}
+                    />
+                  )}
                   <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center gap-2 rounded-xl">
                     <button
                       type="button"
@@ -298,15 +343,19 @@ export function ImageUpload({
           {previewUrl && (
             <div className="p-2 bg-surface border border-border-neutral rounded-xl flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <img
-                  src={previewUrl}
-                  alt="Preview"
-                  className="w-10 h-10 object-contain rounded-lg border border-border-neutral bg-white"
-                  onError={(e) => {
-                    e.currentTarget.src =
-                      'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=400&q=80';
-                  }}
-                />
+                {imageLoadFailed ? (
+                  <div className="w-10 h-10 rounded-lg bg-surface-subtle border border-border-neutral flex items-center justify-center text-status-error shrink-0">
+                    <AlertCircle className="w-5 h-5" />
+                  </div>
+                ) : (
+                  <img
+                    key={previewUrl}
+                    src={previewUrl}
+                    alt="Preview"
+                    className="w-10 h-10 object-contain rounded-lg border border-border-neutral bg-white"
+                    onError={handleImageError}
+                  />
+                )}
                 <span className="text-[11px] text-text-muted truncate max-w-[200px]">{previewUrl}</span>
               </div>
               <button
