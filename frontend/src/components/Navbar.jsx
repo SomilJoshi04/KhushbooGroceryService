@@ -36,6 +36,7 @@ import { useStoreSettings } from '../context/StoreSettingsContext.jsx';
 import { motion, AnimatePresence } from 'framer-motion';
 import { LocationPickerModal } from './map/LocationPickerModal.jsx';
 import { NotificationBell } from './NotificationBell.jsx';
+import { resolveImageUrl, getApiUploadUrl } from '../config/api.js';
 
 export function Navbar({ onOpenAuth }) {
   const { user, isAuthenticated, isAdmin, isSuperAdmin, logout, exitPreviewMode } = useAuth();
@@ -375,10 +376,15 @@ export function Navbar({ onOpenAuth }) {
                   <div className="w-6 h-6 rounded-full overflow-hidden bg-brand-light text-brand flex items-center justify-center font-bold text-[11px] shrink-0 border border-brand/20">
                     {user?.avatar ? (
                       <img
-                        src={user.avatar}
+                        src={resolveImageUrl(user.avatar)}
                         alt={user?.name || 'User'}
                         className="w-full h-full object-cover"
                         onError={(e) => {
+                          const apiFallback = getApiUploadUrl(user.avatar);
+                          if (apiFallback && e.currentTarget.src !== apiFallback) {
+                            e.currentTarget.src = apiFallback;
+                            return;
+                          }
                           e.currentTarget.style.display = 'none';
                         }}
                       />
@@ -398,10 +404,15 @@ export function Navbar({ onOpenAuth }) {
                       <div className="w-9 h-9 rounded-full overflow-hidden bg-brand-light text-brand flex items-center justify-center font-bold text-xs shrink-0 border border-brand/20">
                         {user?.avatar ? (
                           <img
-                            src={user.avatar}
+                            src={resolveImageUrl(user.avatar)}
                             alt={user?.name || 'User'}
                             className="w-full h-full object-cover"
                             onError={(e) => {
+                              const apiFallback = getApiUploadUrl(user.avatar);
+                              if (apiFallback && e.currentTarget.src !== apiFallback) {
+                                e.currentTarget.src = apiFallback;
+                                return;
+                              }
                               e.currentTarget.style.display = 'none';
                             }}
                           />

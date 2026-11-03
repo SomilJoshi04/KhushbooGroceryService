@@ -166,6 +166,15 @@ export function AdminOrders() {
     };
   }, [page, statusFilter, searchParams]);
 
+  // Real-time auto-refresh when an order event arrives via Socket.IO
+  useEffect(() => {
+    const handleLiveOrderEvent = () => {
+      fetchOrders(page);
+    };
+    window.addEventListener('khushboo:order_state_changed', handleLiveOrderEvent);
+    return () => window.removeEventListener('khushboo:order_state_changed', handleLiveOrderEvent);
+  }, [page]);
+
   const handleSearchSubmit = (e) => {
     e.preventDefault();
     const trimmed = search.trim();

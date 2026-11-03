@@ -30,6 +30,17 @@ export async function connectDB() {
       socketTimeoutMS: 45000,
     });
 
+    // Ensure sparse phone index migration is applied if legacy non-sparse index exists
+    try {
+      const userCollection = mongoose.connection.collection('users');
+      const rawIndexes = await userCollection.indexes();
+      const phoneIdx = rawIndexes.find((idx) => idx.name === 'phone_1');
+      if (phoneIdx && !phoneIdx.sparse) {
+        await userCollection.dropIndex('phone_1');
+        console.info('[db] Dropped legacy non-sparse phone_1 index for seamless email-first auth.');
+      }
+    } catch {}
+
     console.info(`[db] ✅ Connected to MongoDB at ${safeUri}`);
   } catch (err) {
     // Log the message only — never the URI or credentials.

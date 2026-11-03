@@ -269,9 +269,13 @@ export async function createOrder(req, res, next) {
       entityType: 'Order',
       entityId: order._id.toString(),
       actionUrl: `/admin/orders?search=${order.orderNumber}`,
-      metadata: { orderNumber: order.orderNumber },
+      metadata: { orderNumber: order.orderNumber, grandTotalPaise: order.pricing.grandTotalPaise },
       idempotencyKey: `order_created_admin_${order._id}`,
-    }).catch((notifErr) => console.error('[notification] Order creation admin notify error:', notifErr.message));
+    })
+      .then(() => {
+        console.info(`[orderController] Order #${order.orderNumber} placed. Dispatched admin notification.`);
+      })
+      .catch((notifErr) => console.error('[notification] Order creation admin notify error:', notifErr.message));
 
     // Real-Time Notification: Notify customer of order placement
     createNotification({
@@ -286,7 +290,11 @@ export async function createOrder(req, res, next) {
       actionUrl: `/account?tab=orders&orderId=${order._id}`,
       metadata: { orderNumber: order.orderNumber, status: 'PLACED' },
       idempotencyKey: `order_created_cust_${order._id}`,
-    }).catch((notifErr) => console.error('[notification] Order creation customer notify error:', notifErr.message));
+    })
+      .then(() => {
+        console.info(`[orderController] Order #${order.orderNumber} customer confirmation dispatched to user:${userId}.`);
+      })
+      .catch((notifErr) => console.error('[notification] Order creation customer notify error:', notifErr.message));
 
     res.status(201).json({
       success: true,

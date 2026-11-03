@@ -114,14 +114,27 @@ async function socketAuthMiddleware(socket, next) {
  * @returns {Server}
  */
 export function initSocket(httpServer, allowedOrigins) {
-  const originArray = Array.from(allowedOrigins || []);
+  const originSet = new Set();
+  if (allowedOrigins) {
+    for (const o of allowedOrigins) {
+      if (typeof o === 'string' && o.trim()) {
+        originSet.add(o.trim());
+        originSet.add(o.trim().replace(/\/+$/, ''));
+      }
+    }
+  }
 
   ioInstance = new Server(httpServer, {
     cors: {
       origin: (origin, callback) => {
-        if (!origin || allowedOrigins.has(origin)) {
+        if (!origin) {
           return callback(null, true);
         }
+        const cleanOrigin = origin.replace(/\/+$/, '');
+        if (originSet.has(origin) || originSet.has(cleanOrigin)) {
+          return callback(null, true);
+        }
+        console.warn(`[socket.io] CORS rejected origin: ${origin}`);
         return callback(new Error('Socket.IO CORS: Origin not allowed.'));
       },
       credentials: true,
@@ -142,11 +155,16 @@ export function initSocket(httpServer, allowedOrigins) {
     // 1. Every authenticated user joins their personal notification room
     socket.join(`user:${userId}`);
 
-    // 2. Administrative roles join the shared admin room
+    // 2. Administrative roles join both standard 'admins' room and legacy 'admin:notifications' room
     const isAdmin = ['ADMIN', 'SUPER_ADMIN', 'STAFF'].includes(role);
     if (isAdmin) {
+      socket.join('admins');
       socket.join('admin:notifications');
     }
+
+    console.info(
+      `[socket.io] Connected: socketId=${socket.id} userId=${userId} role=${role} rooms=[user:${userId}${isAdmin ? ', admins, admin:notifications' : ''}]`
+    );
 
     // Reject any client attempts to join arbitrary rooms directly
     socket.on('join_room', () => {
@@ -157,15 +175,16 @@ export function initSocket(httpServer, allowedOrigins) {
     socket.emit('notification:connected', {
       connected: true,
       role,
+      rooms: isAdmin ? [`user:${userId}`, 'admins', 'admin:notifications'] : [`user:${userId}`],
       timestamp: new Date().toISOString(),
     });
 
-    socket.on('disconnect', () => {
-      // Automatic cleanup handled by socket.io
+    socket.on('disconnect', (reason) => {
+      console.info(`[socket.io] Disconnected: socketId=${socket.id} userId=${userId} reason=${reason}`);
     });
   });
 
-  console.info('[socket.io] ✅ Real-time notification engine initialized.');
+  console.info('[socket.io] Real-time notification engine initialized.');
   return ioInstance;
 }
 
@@ -186,18 +205,22 @@ export function getIO() {
  */
 export function emitToUser(userId, event, payload) {
   if (!ioInstance || !userId) return;
-  ioInstance.to(`user:${userId.toString()}`).emit(event, payload);
+  const targetRoom = `user:${userId.toString()}`;
+  ioInstance.to(targetRoom).emit(event, payload);
+  console.info(`[socket.io] Emitted ${event} to room ${targetRoom}`);
 }
 
 /**
  * Safely delivers a notification event to all authorized administrative users.
+ * Targets both standard 'admins' room and legacy 'admin:notifications' room.
  *
  * @param {string} event - Socket event name
  * @param {Object} payload - Notification payload
  */
 export function emitToAdmins(event, payload) {
   if (!ioInstance) return;
-  ioInstance.to('admin:notifications').emit(event, payload);
+  ioInstance.to('admins').to('admin:notifications').emit(event, payload);
+  console.info(`[socket.io] Emitted ${event} to rooms [admins, admin:notifications]`);
 }
 
 /**
@@ -209,6 +232,7 @@ export function emitToAdmins(event, payload) {
 export function emitToAll(event, payload) {
   if (!ioInstance) return;
   ioInstance.emit(event, payload);
+  console.info(`[socket.io] Broadcast ${event} to all connected clients`);
 }
 
 /**

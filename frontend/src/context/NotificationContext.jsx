@@ -18,6 +18,7 @@ import {
   playNotificationSound,
   testNotificationSound,
   initializeAudioUnlock,
+  unlockAudioWithInteraction,
 } from '../utils/soundManager.js';
 import { swrCache } from '../utils/swrCache.js';
 
@@ -32,6 +33,7 @@ export function NotificationProvider({ children }) {
   const [loading, setLoading] = useState(false);
   const [globalSoundEnabled, setGlobalSoundEnabled] = useState(true);
   const [soundCooldownSeconds, setSoundCooldownSeconds] = useState(3);
+  const [audioBlocked, setAudioBlocked] = useState(false);
 
   // Keep ref to avoid stale closures in socket listener
   const soundConfigRef = useRef({
@@ -55,6 +57,20 @@ export function NotificationProvider({ children }) {
   // Initialize browser audio unlock listener on mount
   useEffect(() => {
     initializeAudioUnlock();
+
+    const handleBlocked = (e) => {
+      setAudioBlocked(Boolean(e.detail?.blocked));
+    };
+    window.addEventListener('khushboo:audio_blocked', handleBlocked);
+    return () => window.removeEventListener('khushboo:audio_blocked', handleBlocked);
+  }, []);
+
+  const enableAudioAlerts = useCallback(async () => {
+    const success = await unlockAudioWithInteraction();
+    if (success) {
+      setAudioBlocked(false);
+    }
+    return success;
   }, []);
 
   // Fetch initial global settings using shared SWR cache (deduplicated with StoreSettingsContext)
@@ -196,6 +212,14 @@ export function NotificationProvider({ children }) {
         console.warn('[sound] Playback error suppressed:', err?.message);
       });
 
+      // Trigger live UI refresh for active order lists (admin orders and customer order tracking)
+      const isOrderEvent =
+        notification.category === 'ORDER' ||
+        (typeof notification.type === 'string' && notification.type.startsWith('ORDER_'));
+      if (isOrderEvent && typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('khushboo:order_state_changed', { detail: notification }));
+      }
+
       // Play soft browser notification if permission granted
       try {
         if ('Notification' in window && Notification.permission === 'granted') {
@@ -320,6 +344,8 @@ export function NotificationProvider({ children }) {
         isConnected,
         globalSoundEnabled,
         soundCooldownSeconds,
+        audioBlocked,
+        enableAudioAlerts,
         testNotificationSound,
         fetchNotifications,
         fetchUnreadCount,

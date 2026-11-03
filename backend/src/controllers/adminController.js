@@ -427,8 +427,12 @@ export async function updateOrderStatus(req, res, next) {
           orderNumber: order.orderNumber,
           status,
         },
-        idempotencyKey: `order_status_update_${order._id}_${status}`,
-      }).catch((notifErr) => console.error('[notification] Order status customer notify error:', notifErr.message));
+        idempotencyKey: `order_status_update_${order._id}_${status}_${order.statusHistory.length}`,
+      })
+        .then(() => {
+          console.info(`[adminController] Order #${order.orderNumber} status changed to ${status}. Dispatched customer notification to user:${order.customer}`);
+        })
+        .catch((notifErr) => console.error('[notification] Order status customer notify error:', notifErr.message));
     }
 
     res.json({
@@ -2274,8 +2278,12 @@ export async function bulkUpdateOrderStatus(req, res, next) {
               orderNumber: doc.orderNumber,
               status: ctx.targetStatus,
             },
-            idempotencyKey: `order_bulk_status_${doc._id}_${ctx.targetStatus}`,
-          }).catch((notifErr) => console.error('[notification] Bulk order status customer notify error:', notifErr.message));
+            idempotencyKey: `order_bulk_status_${doc._id}_${ctx.targetStatus}_${doc.statusHistory.length}`,
+          })
+            .then(() => {
+              console.info(`[adminController] Bulk order #${doc.orderNumber} status changed to ${ctx.targetStatus}. Dispatched to user:${doc.customer}`);
+            })
+            .catch((notifErr) => console.error('[notification] Bulk order status customer notify error:', notifErr.message));
         }
 
         return { status: 'success' };

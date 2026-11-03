@@ -118,11 +118,32 @@ app.use(
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 2c. CORS — explicit allowlist from environment.
-//
-// CLIENT_URL is a single origin for now (one frontend). When multiple origins
-// are needed, change env to a comma-separated list and parse it here.
 // ─────────────────────────────────────────────────────────────────────────────
-const ALLOWED_ORIGINS = new Set([env.CLIENT_URL]);
+const ALLOWED_ORIGINS = new Set();
+
+function registerOrigin(urlStr) {
+  if (!urlStr || typeof urlStr !== 'string') return;
+  const trimmed = urlStr.trim();
+  if (!trimmed) return;
+  const noSlash = trimmed.replace(/\/+$/, '');
+  ALLOWED_ORIGINS.add(trimmed);
+  ALLOWED_ORIGINS.add(noSlash);
+
+  try {
+    const parsed = new URL(trimmed);
+    const host = parsed.hostname;
+    if (host.startsWith('www.')) {
+      const nonWww = `${parsed.protocol}//${host.slice(4)}${parsed.port ? `:${parsed.port}` : ''}`;
+      ALLOWED_ORIGINS.add(nonWww);
+    } else if (!['localhost', '127.0.0.1'].includes(host) && !host.startsWith('192.168.')) {
+      const withWww = `${parsed.protocol}//www.${host}${parsed.port ? `:${parsed.port}` : ''}`;
+      ALLOWED_ORIGINS.add(withWww);
+    }
+  } catch {}
+}
+
+registerOrigin(env.CLIENT_URL);
+registerOrigin(env.FRONTEND_URL);
 
 // Always allow localhost during development regardless of CLIENT_URL.
 if (env.NODE_ENV !== 'production') {
@@ -139,7 +160,8 @@ app.use(
       if (!requestOrigin) {
         return callback(null, true);
       }
-      if (ALLOWED_ORIGINS.has(requestOrigin)) {
+      const cleanOrigin = requestOrigin.replace(/\/+$/, '');
+      if (ALLOWED_ORIGINS.has(requestOrigin) || ALLOWED_ORIGINS.has(cleanOrigin)) {
         return callback(null, true);
       }
       console.warn(`[cors] Blocked origin: ${requestOrigin}`);

@@ -28,6 +28,7 @@ import {
   Wifi,
   WifiOff,
   X,
+  Volume2,
 } from 'lucide-react';
 import { useNotifications } from '../context/NotificationContext.jsx';
 
@@ -92,6 +93,8 @@ export function NotificationBell({ placement = 'customer' }) {
     unreadCount,
     loading,
     isConnected,
+    audioBlocked,
+    enableAudioAlerts,
     markAsRead,
     markAllAsRead,
     deleteNotification,
@@ -228,6 +231,23 @@ export function NotificationBell({ placement = 'customer' }) {
                 </button>
               </div>
             </div>
+
+            {/* Browser Autoplay Blocked Banner */}
+            {audioBlocked && (
+              <div className="p-2.5 bg-amber-500/10 border-b border-amber-500/20 flex items-center justify-between text-xs text-amber-800 shrink-0">
+                <div className="flex items-center gap-1.5 min-w-0 pr-2">
+                  <Volume2 className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span className="truncate text-[11px] font-medium">Browser blocked audio alerts</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={enableAudioAlerts}
+                  className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-bold rounded-lg transition shrink-0 cursor-pointer shadow-xs active:scale-95"
+                >
+                  Enable Sound
+                </button>
+              </div>
+            )}
 
             {/* Filter Pills */}
             <div className="px-3 py-2 border-b border-border-neutral flex items-center justify-between gap-2 bg-surface shrink-0">

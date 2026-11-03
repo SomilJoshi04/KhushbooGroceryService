@@ -53,6 +53,7 @@ import { LocationPickerModal } from '../components/map/LocationPickerModal.jsx';
 import { Pagination } from '../components/Pagination.jsx';
 import { useNotifications } from '../context/NotificationContext.jsx';
 import { SkeletonAccountPage, SkeletonOrderList, SkeletonBase, SkeletonText } from '../components/skeleton/index.js';
+import { resolveImageUrl, getApiUploadUrl } from '../config/api.js';
 
 export function AccountPage({ onOpenAuth }) {
   const {
@@ -397,6 +398,17 @@ export function AccountPage({ onOpenAuth }) {
     }
   }, [isAuthenticated, ordersPage]);
 
+  // Real-time order list auto-update when status changes over Socket.IO
+  useEffect(() => {
+    const handleLiveOrderEvent = () => {
+      if (isAuthenticated) {
+        fetchOrders(ordersPage);
+      }
+    };
+    window.addEventListener('khushboo:order_state_changed', handleLiveOrderEvent);
+    return () => window.removeEventListener('khushboo:order_state_changed', handleLiveOrderEvent);
+  }, [isAuthenticated, ordersPage]);
+
   if (authLoading) {
     return <SkeletonAccountPage />;
   }
@@ -582,10 +594,15 @@ export function AccountPage({ onOpenAuth }) {
               <div className="w-full h-full rounded-2xl overflow-hidden bg-brand/10 border-2 border-brand/20 shadow-xs flex items-center justify-center relative">
                 {user?.avatar ? (
                   <img
-                    src={user.avatar}
+                    src={resolveImageUrl(user.avatar)}
                     alt={user?.name || 'Customer'}
                     className="w-full h-full object-cover"
                     onError={(e) => {
+                      const apiFallback = getApiUploadUrl(user.avatar);
+                      if (apiFallback && e.currentTarget.src !== apiFallback) {
+                        e.currentTarget.src = apiFallback;
+                        return;
+                      }
                       e.currentTarget.style.display = 'none';
                     }}
                   />
@@ -994,10 +1011,15 @@ export function AccountPage({ onOpenAuth }) {
               <div className="w-16 h-16 rounded-xl overflow-hidden bg-brand/10 border border-brand/20 relative shrink-0">
                 {user?.avatar ? (
                   <img
-                    src={user.avatar}
+                    src={resolveImageUrl(user.avatar)}
                     alt={user?.name || 'Customer'}
                     className="w-full h-full object-cover"
                     onError={(e) => {
+                      const apiFallback = getApiUploadUrl(user.avatar);
+                      if (apiFallback && e.currentTarget.src !== apiFallback) {
+                        e.currentTarget.src = apiFallback;
+                        return;
+                      }
                       e.currentTarget.style.display = 'none';
                     }}
                   />

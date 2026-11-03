@@ -85,6 +85,48 @@ function getAudioInstance() {
   return audioInstance;
 }
 
+// Attaches user interaction listeners to unlock audio playback.
+let audioCtx = null;
+let autoplayBlocked = false;
+
+function unlockWebAudioEngine() {
+  if (typeof window === 'undefined') return;
+
+  try {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (AudioContextClass) {
+      if (!audioCtx) {
+        audioCtx = new AudioContextClass();
+      }
+      if (audioCtx.state === 'suspended') {
+        audioCtx.resume();
+      }
+    }
+  } catch {}
+
+  try {
+    const audio = getAudioInstance();
+    if (audio) {
+      const playPromise = audio.play();
+      if (playPromise !== undefined) {
+        playPromise
+          .then(() => {
+            audio.pause();
+            audio.currentTime = 0;
+            isAudioUnlocked = true;
+            if (autoplayBlocked) {
+              autoplayBlocked = false;
+              window.dispatchEvent(new CustomEvent('khushboo:audio_blocked', { detail: { blocked: false } }));
+            }
+          })
+          .catch(() => {
+            // Still locked
+          });
+      }
+    }
+  } catch {}
+}
+
 /**
  * Attaches user interaction listeners to unlock audio playback.
  */
@@ -93,12 +135,7 @@ export function initializeAudioUnlock() {
 
   const unlock = () => {
     isAudioUnlocked = true;
-    try {
-      const audio = getAudioInstance();
-      if (audio) {
-        audio.load();
-      }
-    } catch {}
+    unlockWebAudioEngine();
     window.removeEventListener('click', unlock);
     window.removeEventListener('keydown', unlock);
     window.removeEventListener('touchstart', unlock);
@@ -109,6 +146,30 @@ export function initializeAudioUnlock() {
   window.addEventListener('keydown', unlock, { once: true, passive: true });
   window.addEventListener('touchstart', unlock, { once: true, passive: true });
   window.addEventListener('pointerdown', unlock, { once: true, passive: true });
+}
+
+/**
+ * Programmatically unlocks audio via direct user interaction button/pill.
+ */
+export async function unlockAudioWithInteraction() {
+  isAudioUnlocked = true;
+  unlockWebAudioEngine();
+  try {
+    const audio = getAudioInstance();
+    if (audio) {
+      audio.currentTime = 0;
+      audio.volume = 1.0;
+      await audio.play();
+      autoplayBlocked = false;
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('khushboo:audio_blocked', { detail: { blocked: false } }));
+      }
+      return true;
+    }
+  } catch {
+    return false;
+  }
+  return false;
 }
 
 /**
@@ -146,7 +207,7 @@ export function isNotificationSoundEligible(notification, userRole = 'CUSTOMER')
     isOnAdminPath;
 
   if (isAdmin) {
-    // Admin sound events: customer orders, inquiries, cancellations, verified payments, low stock alerts
+    // Admin sound events: incoming customer orders, inquiries, cancellations, verified payments, low stock alerts
     const eligibleAdminTypes = [
       'ORDER_CREATED',
       'ORDER_CANCEL_REQUESTED',
@@ -159,9 +220,10 @@ export function isNotificationSoundEligible(notification, userRole = 'CUSTOMER')
     return eligibleAdminTypes.includes(type);
   }
 
-  // Customer sound events: order confirmation, status updates, delivery alerts, cancellations, refunds, support replies
+  // Customer sound events: order status updates (CONFIRMED, PROCESSING, OUT_FOR_DELIVERY, DELIVERED),
+  // cancellations, refunds, support replies. ORDER_CREATED is silent for the placing customer
+  // because checkout already displays success UI, preventing annoying self-alerts.
   const eligibleCustomerTypes = [
-    'ORDER_CREATED',
     'ORDER_STATUS_UPDATED',
     'ORDER_CANCELLED',
     'PAYMENT_REFUNDED',
@@ -276,7 +338,11 @@ export async function playNotificationSound({
     return true;
   } catch (err) {
     if (err.name === 'NotAllowedError') {
-      console.warn('[soundManager] Autoplay was prevented by browser policy. Sound will play on next user interaction.');
+      autoplayBlocked = true;
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('khushboo:audio_blocked', { detail: { blocked: true } }));
+      }
+      console.warn('[soundManager] Autoplay was prevented by browser policy. User interaction required to unlock audio.');
     } else {
       console.warn('[soundManager] Audio playback error:', err.message);
     }
