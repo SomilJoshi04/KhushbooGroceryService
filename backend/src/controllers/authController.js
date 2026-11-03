@@ -2,10 +2,16 @@
  * Authentication and User Controller.
  *
  * Implements:
- * - Customer Phone OTP login (single-use, hashed, attempt-limited, cooled down).
- * - Administrator credentials login with bcrypt and audit logging.
+ * - Customer Registration with unique username & email, strong password policy, and email verification.
+ * - Single-use cryptographic Email Verification tokens with expiration and rate limiting.
+ * - Dual Identifier Customer Login (Email OR Username + Password).
+ * - Anti-brute-force account lockout and timing-safe authentication.
+ * - Rotating refresh tokens stored as SHA-256 hashes in MongoDB with HttpOnly cookies.
+ * - Single and All-device session revocation.
+ * - Token-based Password Reset and Change Password workflows.
+ * - Legacy Phone Account Claim flow preserving all order, address, and cart data.
+ * - Administrative credentials login with bcrypt and audit logging.
  * - Profile and delivery address management.
- * - Secure session invalidation (logout).
  *
  * @module controllers/authController
  */
@@ -22,16 +28,25 @@ import { OtpSession } from '../models/OtpSession.js';
 import { AuditLog } from '../models/AuditLog.js';
 import { smsService } from '../services/smsAdapter.js';
 import {
+  sendVerificationEmail,
+  sendPasswordResetEmail,
+  sendPasswordChangedNotification,
+} from '../services/emailService.js';
+import {
   deleteFile,
   getPublicFileUrl,
   STORAGE_SUBFOLDERS,
 } from '../services/fileStorageService.js';
 import {
-  generateToken,
-  setAuthCookie,
-  clearAuthCookie,
+  generateAccessToken,
+  generateRefreshToken,
+  generateSecureToken,
+  hashToken,
+  setAuthCookies,
+  clearAuthCookies,
   generateOtp,
   hashOtp,
+  REFRESH_COOKIE_NAME,
 } from '../utils/token.js';
 import { env } from '../config/env.js';
 
@@ -39,35 +54,794 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const UPLOADS_DIR = path.resolve(__dirname, '../../uploads');
 
+// Timing-attack mitigation dummy hash
+const TIMING_SAFE_DUMMY_HASH = '$2a$12$e8Y6BfH8Y8ZzQe9Y8.9QXe3.f3q3bQ3uU7H9O7O8K6Y5U4I3O2P1e';
+
+// ── 1. CUSTOMER REGISTRATION ────────────────────────────────────────────────
+
 /**
- * POST /api/v1/auth/otp/request
- * Request a 6-digit OTP sent to an Indian mobile number.
+ * POST /api/v1/auth/register
+ * Creates a new customer account with Email, Username, and Password.
+ * Sends an email verification link. Account remains unverified until link is confirmed.
  */
-export async function requestOtp(req, res, next) {
+export async function register(req, res, next) {
+  try {
+    const { fullName, username, email, password, acceptTerms } = req.body;
+
+    const normalizedEmail = email.toLowerCase().trim();
+    const normalizedUsername = username ? String(username).toLowerCase().trim() : undefined;
+
+    // Check for duplicate email
+    const existingEmail = await User.findOne({ email: normalizedEmail });
+    if (existingEmail) {
+      return res.status(409).json({
+        success: false,
+        requestId: req.id,
+        message: 'An account with this email address is already registered. Please sign in or use password recovery.',
+      });
+    }
+
+    // If username is provided, check for uniqueness
+    if (normalizedUsername) {
+      const existingUsername = await User.findOne({ username: normalizedUsername });
+      if (existingUsername) {
+        return res.status(409).json({
+          success: false,
+          requestId: req.id,
+          message: 'This username is already taken. Please choose another username.',
+        });
+      }
+    }
+
+    // Hash password with bcrypt cost factor 12
+    const salt = await bcrypt.genSalt(12);
+    const hashedPassword = await bcrypt.hash(password, salt);
+
+    // Check if SMTP is actively configured
+    const isSmtpConfigured = Boolean(env.SMTP_USER && env.SMTP_PASSWORD && env.SMTP_HOST);
+    const isEmailVerified = !isSmtpConfigured;
+
+    // Generate single-use verification token (SHA-256 hash stored in DB)
+    const rawVerificationToken = generateSecureToken(32);
+    const verificationTokenHash = hashToken(rawVerificationToken);
+    const verificationExpires = new Date(Date.now() + 30 * 60 * 1000); // 30 minutes
+
+    const userPayload = {
+      fullName,
+      name: fullName,
+      email: normalizedEmail,
+      password: hashedPassword,
+      role: 'CUSTOMER',
+      isEmailVerified,
+      emailVerificationTokenHash: isEmailVerified ? null : verificationTokenHash,
+      emailVerificationExpires: isEmailVerified ? null : verificationExpires,
+      isActive: true,
+      privacyConsent: {
+        agreed: Boolean(acceptTerms),
+        agreedAt: new Date(),
+        policyVersion: '1.0',
+        termsVersion: '1.0',
+        ipAddress: req.ip || '',
+        userAgent: req.headers['user-agent'] || '',
+      },
+    };
+
+    if (normalizedUsername) {
+      userPayload.username = normalizedUsername;
+    }
+
+    const newUser = await User.create(userPayload);
+
+    // Send branded verification email (only if SMTP is configured)
+    if (isSmtpConfigured) {
+      try {
+        await sendVerificationEmail(normalizedEmail, fullName, rawVerificationToken);
+      } catch (emailErr) {
+        console.error('[auth:register] Failed to deliver verification email:', emailErr.message);
+      }
+    }
+
+    await AuditLog.create({
+      action: 'CUSTOMER_REGISTERED',
+      performedBy: newUser._id,
+      performerRole: 'CUSTOMER',
+      targetType: 'User',
+      targetId: newUser._id.toString(),
+      details: { email: normalizedEmail, ...(normalizedUsername ? { username: normalizedUsername } : {}) },
+      ipAddress: req.ip || '',
+      requestId: req.id,
+    });
+
+    res.status(201).json({
+      success: true,
+      requestId: req.id,
+      isEmailVerified,
+      message: isEmailVerified
+        ? 'Registration successful! Your account is active. Please sign in.'
+        : 'Registration successful! A verification link has been sent to your email address. Please verify your email before logging in.',
+      email: normalizedEmail,
+    });
+  } catch (err) {
+    if (err.code === 11000) {
+      const field = Object.keys(err.keyPattern || {})[0] || 'credential';
+      return res.status(409).json({
+        success: false,
+        requestId: req.id,
+        message: `An account with this ${field} already exists.`,
+      });
+    }
+    next(err);
+  }
+}
+
+// ── 2. EMAIL VERIFICATION ───────────────────────────────────────────────────
+
+/**
+ * POST /api/v1/auth/verify-email
+ * Verifies a customer's email address using a single-use token.
+ */
+export async function verifyEmail(req, res, next) {
+  try {
+    const rawToken = req.body?.token || req.query?.token;
+
+    if (!rawToken || typeof rawToken !== 'string') {
+      return res.status(400).json({
+        success: false,
+        requestId: req.id,
+        message: 'A valid email verification token is required.',
+      });
+    }
+
+    const tokenHash = hashToken(rawToken);
+
+    // Find user with matching unexpired verification token
+    const user = await User.findOne({
+      emailVerificationTokenHash: tokenHash,
+      emailVerificationExpires: { $gt: new Date() },
+    });
+
+    if (!user) {
+      return res.status(400).json({
+        success: false,
+        requestId: req.id,
+        message: 'The email verification link is invalid, expired, or has already been used. Please request a new verification email.',
+      });
+    }
+
+    // Mark verified and invalidate token (single-use)
+    user.isEmailVerified = true;
+    user.emailVerificationTokenHash = null;
+    user.emailVerificationExpires = null;
+    await user.save();
+
+    await AuditLog.create({
+      action: 'CUSTOMER_EMAIL_VERIFIED',
+      performedBy: user._id,
+      performerRole: user.role,
+      targetType: 'User',
+      targetId: user._id.toString(),
+      details: { email: user.email },
+      ipAddress: req.ip || '',
+      requestId: req.id,
+    });
+
+    res.json({
+      success: true,
+      requestId: req.id,
+      message: 'Your email address has been verified successfully! You can now sign in to your Khushboo Food Service account.',
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * POST /api/v1/auth/resend-verification
+ * Resends a new verification email. Applies rate limiting and prevents account enumeration.
+ */
+export async function resendVerification(req, res, next) {
+  try {
+    const { email } = req.body;
+    const normalizedEmail = String(email).toLowerCase().trim();
+
+    // Generic response returned regardless to prevent account enumeration
+    const genericResponse = {
+      success: true,
+      requestId: req.id,
+      message: 'If an unverified account is registered with this email, a new verification link has been sent. Please check your inbox.',
+    };
+
+    const user = await User.findOne({
+      email: normalizedEmail,
+      isEmailVerified: false,
+      isActive: true,
+      isDeleted: false,
+    });
+
+    if (!user) {
+      return res.json(genericResponse);
+    }
+
+    // Generate new token and expiry
+    const rawToken = generateSecureToken(32);
+    user.emailVerificationTokenHash = hashToken(rawToken);
+    user.emailVerificationExpires = new Date(Date.now() + 30 * 60 * 1000);
+    await user.save();
+
+    try {
+      await sendVerificationEmail(user.email, user.name || user.fullName, rawToken);
+    } catch (emailErr) {
+      console.error('[auth:resendVerification] Failed to deliver email:', emailErr.message);
+    }
+
+    res.json(genericResponse);
+  } catch (err) {
+    next(err);
+  }
+}
+
+// ── 3. LOGIN & SESSION CREATION ─────────────────────────────────────────────
+
+/**
+ * POST /api/v1/auth/login
+ * Authenticates customers using Email OR Username + Password.
+ * Supports remember-me, progressive account lockout, and rotating refresh tokens.
+ */
+export async function login(req, res, next) {
+  try {
+    const { identifier, email, password, rememberMe = false } = req.body;
+    const normalizedIdentifier = String(identifier || email || '').toLowerCase().trim();
+    const rawPassword = String(password || '');
+
+    if (!normalizedIdentifier || !rawPassword) {
+      await bcrypt.compare('dummy', TIMING_SAFE_DUMMY_HASH);
+      return res.status(401).json({
+        success: false,
+        requestId: req.id,
+        message: 'Invalid email or password.',
+      });
+    }
+
+    // Query user by email OR username
+    const user = await User.findOne({
+      $or: [{ email: normalizedIdentifier }, { username: normalizedIdentifier }],
+    }).select('+password');
+
+    if (!user) {
+      // Execute timing-safe bcrypt compare
+      await bcrypt.compare(rawPassword, TIMING_SAFE_DUMMY_HASH);
+      return res.status(401).json({
+        success: false,
+        requestId: req.id,
+        message: 'Invalid email or password.',
+      });
+    }
+
+    // Check account status
+    if (user.isDeleted || !user.isActive) {
+      return res.status(403).json({
+        success: false,
+        requestId: req.id,
+        message: user.suspendedReason
+          ? `Your account is suspended: ${user.suspendedReason}. Please contact support.`
+          : 'Your account is deactivated or deleted. Please contact support.',
+      });
+    }
+
+    // Progressive Lockout check (5 failed attempts = 15 minute temporary lockout)
+    if (user.lockUntil && user.lockUntil > new Date()) {
+      const remainingMinutes = Math.ceil((user.lockUntil.getTime() - Date.now()) / 60000);
+      return res.status(423).json({
+        success: false,
+        requestId: req.id,
+        message: `Account is temporarily locked due to multiple failed login attempts. Please try again in ${remainingMinutes} minute(s).`,
+      });
+    }
+
+    // Validate password
+    const isMatch = await bcrypt.compare(rawPassword, user.password || '');
+    if (!isMatch) {
+      user.failedLoginAttempts = (user.failedLoginAttempts || 0) + 1;
+
+      if (user.failedLoginAttempts >= 5) {
+        user.lockUntil = new Date(Date.now() + 15 * 60 * 1000);
+        await user.save();
+
+        await AuditLog.create({
+          action: 'ACCOUNT_LOCKED_FAILED_ATTEMPTS',
+          performedBy: user._id,
+          performerRole: user.role,
+          targetType: 'User',
+          targetId: user._id.toString(),
+          details: { failedAttempts: user.failedLoginAttempts },
+          ipAddress: req.ip || '',
+          requestId: req.id,
+        });
+
+        return res.status(423).json({
+          success: false,
+          requestId: req.id,
+          message: 'Too many consecutive failed login attempts. Your account has been temporarily locked for 15 minutes.',
+        });
+      }
+
+      await user.save();
+
+      return res.status(401).json({
+        success: false,
+        requestId: req.id,
+        message: 'Invalid email or password.',
+      });
+    }
+
+    // Legacy accounts that must complete email/password setup
+    if (user.legacyAccountRequiresSetup) {
+      return res.status(403).json({
+        success: false,
+        requestId: req.id,
+        requiresMigration: true,
+        message: 'Your account was registered via mobile OTP and requires setting up your login credentials. Please use the "Claim Legacy Account" flow.',
+      });
+    }
+
+    // Check email verification (Customers only; Admin accounts handled separately)
+    const isSmtpConfigured = Boolean(env.SMTP_USER && env.SMTP_PASSWORD && env.SMTP_HOST);
+    if (user.role === 'CUSTOMER' && !user.isEmailVerified) {
+      if (!isSmtpConfigured) {
+        // Auto-verify if SMTP is not configured so users are never locked out in dev/local mode
+        user.isEmailVerified = true;
+        await user.save();
+      } else {
+        return res.status(403).json({
+          success: false,
+          requestId: req.id,
+          isUnverified: true,
+          email: user.email,
+          message: 'Your email address is not yet verified. Please verify your email before logging in.',
+        });
+      }
+    }
+
+    // Reset failed login counter and lockout on successful login
+    user.failedLoginAttempts = 0;
+    user.lockUntil = null;
+    user.lastLoginAt = new Date();
+
+    // Generate short-lived access token
+    const tokenPayload = {
+      id: user._id.toString(),
+      role: user.role,
+      email: user.email,
+      username: user.username,
+      sessionVersion: user.sessionVersion || 1,
+    };
+    const accessToken = generateAccessToken(tokenPayload);
+
+    // Generate rotating refresh token
+    const { tokenId, rawToken: rawRefreshToken } = generateRefreshToken();
+    const refreshTokenHash = hashToken(rawRefreshToken);
+    const refreshExpiry = new Date(
+      Date.now() + (rememberMe ? 7 * 24 * 60 * 60 * 1000 : 24 * 60 * 60 * 1000)
+    );
+
+    // Clean expired refresh tokens and enforce maximum active sessions cap (10)
+    user.refreshTokens = (user.refreshTokens || []).filter((t) => t.expiresAt > new Date());
+    if (user.refreshTokens.length >= 10) {
+      user.refreshTokens.shift();
+    }
+
+    user.refreshTokens.push({
+      tokenId,
+      tokenHash: refreshTokenHash,
+      expiresAt: refreshExpiry,
+      userAgent: req.headers['user-agent'] || '',
+      ipAddress: req.ip || '',
+    });
+
+    await user.save();
+
+    // Set secure HttpOnly cookies
+    setAuthCookies(res, {
+      accessToken,
+      refreshToken: rawRefreshToken,
+      rememberMe: Boolean(rememberMe),
+    });
+
+    res.json({
+      success: true,
+      requestId: req.id,
+      message: 'Login successful.',
+      user: user.toSafeObject(),
+      token: accessToken,
+      accessToken,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+// ── 4. REFRESH TOKEN ROTATION ───────────────────────────────────────────────
+
+/**
+ * POST /api/v1/auth/refresh
+ * Rotates the refresh token and issues a new access token.
+ * Protects against token reuse/replay attacks.
+ */
+export async function refreshToken(req, res, next) {
+  try {
+    const rawRefreshToken =
+      req.cookies?.[REFRESH_COOKIE_NAME] || req.body?.refreshToken;
+
+    if (!rawRefreshToken || typeof rawRefreshToken !== 'string') {
+      return res.status(401).json({
+        success: false,
+        requestId: req.id,
+        message: 'Refresh token is required.',
+      });
+    }
+
+    const incomingTokenHash = hashToken(rawRefreshToken);
+
+    // Find the user holding this refresh token
+    const user = await User.findOne({
+      'refreshTokens.tokenHash': incomingTokenHash,
+    });
+
+    if (!user || !user.isActive || user.isDeleted) {
+      // Possible token replay or forged token: clear auth cookies
+      clearAuthCookies(res);
+      return res.status(401).json({
+        success: false,
+        requestId: req.id,
+        message: 'Invalid or expired session. Please log in again.',
+      });
+    }
+
+    // Locate the active token session
+    const sessionRecord = user.refreshTokens.find(
+      (t) => t.tokenHash === incomingTokenHash
+    );
+
+    if (!sessionRecord || sessionRecord.expiresAt <= new Date()) {
+      // Invalidate the expired token
+      user.refreshTokens = user.refreshTokens.filter(
+        (t) => t.tokenHash !== incomingTokenHash
+      );
+      await user.save();
+      clearAuthCookies(res);
+      return res.status(401).json({
+        success: false,
+        requestId: req.id,
+        message: 'Session expired. Please log in again.',
+      });
+    }
+
+    // Token Rotation: Invalidate the used token and issue a fresh one
+    user.refreshTokens = user.refreshTokens.filter(
+      (t) => t.tokenHash !== incomingTokenHash
+    );
+
+    const { tokenId: newId, rawToken: newRawRefreshToken } = generateRefreshToken();
+    const newRefreshTokenHash = hashToken(newRawRefreshToken);
+    const newRefreshExpiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+
+    user.refreshTokens.push({
+      tokenId: newId,
+      tokenHash: newRefreshTokenHash,
+      expiresAt: newRefreshExpiry,
+      userAgent: req.headers['user-agent'] || '',
+      ipAddress: req.ip || '',
+    });
+
+    await user.save();
+
+    const tokenPayload = {
+      id: user._id.toString(),
+      role: user.role,
+      email: user.email,
+      username: user.username,
+      sessionVersion: user.sessionVersion || 1,
+    };
+    const newAccessToken = generateAccessToken(tokenPayload);
+
+    // Update HttpOnly cookies
+    setAuthCookies(res, {
+      accessToken: newAccessToken,
+      refreshToken: newRawRefreshToken,
+      rememberMe: true,
+    });
+
+    res.json({
+      success: true,
+      requestId: req.id,
+      token: newAccessToken,
+      accessToken: newAccessToken,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+// ── 5. LOGOUT & REVOCATION ──────────────────────────────────────────────────
+
+/**
+ * POST /api/v1/auth/logout
+ * Clears cookies and revokes the current device's refresh token.
+ */
+export async function logout(req, res, next) {
+  try {
+    const rawRefreshToken =
+      req.cookies?.[REFRESH_COOKIE_NAME] || req.body?.refreshToken;
+
+    if (rawRefreshToken && typeof rawRefreshToken === 'string') {
+      const tokenHash = hashToken(rawRefreshToken);
+      await User.updateOne(
+        { 'refreshTokens.tokenHash': tokenHash },
+        { $pull: { refreshTokens: { tokenHash } } }
+      );
+    }
+
+    clearAuthCookies(res);
+
+    res.json({
+      success: true,
+      requestId: req.id,
+      message: 'Logged out successfully.',
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * POST /api/v1/auth/logout-all
+ * Revokes all sessions across all devices for the authenticated user.
+ */
+export async function logoutAll(req, res, next) {
+  try {
+    const user = req.user;
+    user.refreshTokens = [];
+    user.sessionVersion = (user.sessionVersion || 1) + 1;
+    await user.save();
+
+    clearAuthCookies(res);
+
+    await AuditLog.create({
+      action: 'USER_LOGOUT_ALL_DEVICES',
+      performedBy: user._id,
+      performerRole: user.role,
+      targetType: 'User',
+      targetId: user._id.toString(),
+      ipAddress: req.ip || '',
+      requestId: req.id,
+    });
+
+    res.json({
+      success: true,
+      requestId: req.id,
+      message: 'All active sessions on all devices have been signed out.',
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+// ── 6. FORGOT & RESET PASSWORD ──────────────────────────────────────────────
+
+/**
+ * POST /api/v1/auth/forgot-password
+ * Initiates password recovery. Dispatches reset link with 15-minute token.
+ * Prevents account enumeration by returning a generic response.
+ */
+export async function forgotPassword(req, res, next) {
+  try {
+    const { email } = req.body;
+    const normalizedEmail = String(email).toLowerCase().trim();
+
+    const genericResponse = {
+      success: true,
+      requestId: req.id,
+      message: 'If an account is associated with this email, a password reset link has been sent. Please check your inbox.',
+    };
+
+    const user = await User.findOne({
+      email: normalizedEmail,
+      isActive: true,
+      isDeleted: false,
+    });
+
+    if (!user) {
+      return res.json(genericResponse);
+    }
+
+    // Generate single-use reset token (15-minute expiration)
+    const rawResetToken = generateSecureToken(32);
+    user.passwordResetTokenHash = hashToken(rawResetToken);
+    user.passwordResetExpires = new Date(Date.now() + 15 * 60 * 1000);
+    await user.save();
+
+    try {
+      await sendPasswordResetEmail(user.email, user.name || user.fullName, rawResetToken);
+    } catch (emailErr) {
+      console.error('[auth:forgotPassword] Failed to send password reset email:', emailErr.message);
+    }
+
+    res.json(genericResponse);
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * POST /api/v1/auth/reset-password
+ * Completes password recovery using the reset token.
+ * Invalidates token, updates password, and revokes all active sessions.
+ */
+export async function resetPassword(req, res, next) {
+  try {
+    const { token, newPassword } = req.body;
+
+    if (!token || typeof token !== 'string') {
+      return res.status(400).json({
+        success: false,
+        requestId: req.id,
+        message: 'A valid password reset token is required.',
+      });
+    }
+
+    const tokenHash = hashToken(token);
+
+    const user = await User.findOne({
+      passwordResetTokenHash: tokenHash,
+      passwordResetExpires: { $gt: new Date() },
+    });
+
+    if (!user) {
+      return res.status(400).json({
+        success: false,
+        requestId: req.id,
+        message: 'The password reset link is invalid, expired, or has already been used. Please request a new link.',
+      });
+    }
+
+    // Hash the new password with bcrypt (12 rounds)
+    const salt = await bcrypt.genSalt(12);
+    user.password = await bcrypt.hash(newPassword, salt);
+
+    // Invalidate reset token (single-use)
+    user.passwordResetTokenHash = null;
+    user.passwordResetExpires = null;
+    user.passwordChangedAt = new Date();
+
+    // Revoke all existing sessions and refresh tokens
+    user.refreshTokens = [];
+    user.sessionVersion = (user.sessionVersion || 1) + 1;
+    user.failedLoginAttempts = 0;
+    user.lockUntil = null;
+
+    await user.save();
+
+    // Send confirmation email
+    try {
+      await sendPasswordChangedNotification(user.email, user.name || user.fullName);
+    } catch (emailErr) {
+      console.error('[auth:resetPassword] Confirmation email error:', emailErr.message);
+    }
+
+    clearAuthCookies(res);
+
+    await AuditLog.create({
+      action: 'PASSWORD_RESET_SUCCESSFUL',
+      performedBy: user._id,
+      performerRole: user.role,
+      targetType: 'User',
+      targetId: user._id.toString(),
+      ipAddress: req.ip || '',
+      requestId: req.id,
+    });
+
+    res.json({
+      success: true,
+      requestId: req.id,
+      message: 'Your password has been reset successfully. Please log in with your new password.',
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * POST /api/v1/auth/change-password
+ * Authenticated customer password change.
+ */
+export async function changePassword(req, res, next) {
+  try {
+    const { currentPassword, newPassword } = req.body;
+
+    const user = await User.findById(req.user._id).select('+password');
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        requestId: req.id,
+        message: 'User account not found.',
+      });
+    }
+
+    const isMatch = await bcrypt.compare(currentPassword, user.password || '');
+    if (!isMatch) {
+      return res.status(400).json({
+        success: false,
+        requestId: req.id,
+        message: 'Current password is incorrect.',
+      });
+    }
+
+    const salt = await bcrypt.genSalt(12);
+    user.password = await bcrypt.hash(newPassword, salt);
+    user.passwordChangedAt = new Date();
+    user.sessionVersion = (user.sessionVersion || 1) + 1;
+
+    // Invalidate other devices
+    user.refreshTokens = [];
+    await user.save();
+
+    // Issue fresh session for the current client
+    const tokenPayload = {
+      id: user._id.toString(),
+      role: user.role,
+      email: user.email,
+      username: user.username,
+      sessionVersion: user.sessionVersion,
+    };
+    const accessToken = generateAccessToken(tokenPayload);
+
+    setAuthCookies(res, { accessToken, rememberMe: true });
+
+    try {
+      await sendPasswordChangedNotification(user.email, user.name || user.fullName);
+    } catch (e) {
+      // Non-blocking
+    }
+
+    res.json({
+      success: true,
+      requestId: req.id,
+      message: 'Password changed successfully.',
+      token: accessToken,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+// ── 7. LEGACY ACCOUNT MIGRATION / CLAIM ─────────────────────────────────────
+
+/**
+ * POST /api/v1/auth/claim/request-otp
+ * Step 1 of claiming a legacy phone-only account: sends an OTP to verify phone ownership.
+ */
+export async function claimLegacyRequestOtp(req, res, next) {
   try {
     const { phone } = req.body;
 
-    // Check if account already exists and whether it is active
-    const existingUser = await User.findOne({ phone });
-    if (existingUser && (existingUser.role === 'ADMIN' || existingUser.role === 'SUPER_ADMIN')) {
-      return res.status(403).json({
+    const user = await User.findOne({ phone });
+    if (!user) {
+      return res.status(404).json({
         success: false,
         requestId: req.id,
-        message: 'Administrative accounts must sign in through the administrative portal using email and password.',
+        message: 'No existing account was found for this phone number.',
       });
     }
 
-    if (existingUser && (!existingUser.isActive || existingUser.isDeleted)) {
-      return res.status(403).json({
+    if (!user.legacyAccountRequiresSetup && user.password && user.username) {
+      return res.status(400).json({
         success: false,
         requestId: req.id,
-        message: existingUser.suspendedReason
-          ? `Your account is suspended: ${existingUser.suspendedReason}. Please contact customer support.`
-          : 'Your account is deactivated or deleted. Please contact customer support.',
+        message: 'This account has already completed setup. Please log in using your username or email address.',
       });
     }
 
-    // Check cooldown on the latest session for this phone
+    // Enforce resend cooldown
     const recentSession = await OtpSession.findOne({
       phone,
       isVerified: false,
@@ -81,19 +855,17 @@ export async function requestOtp(req, res, next) {
       return res.status(429).json({
         success: false,
         requestId: req.id,
-        message: `Please wait ${waitSeconds} seconds before requesting a new OTP.`,
+        message: `Please wait ${waitSeconds} seconds before requesting a new verification code.`,
         cooldownRemainingSeconds: waitSeconds,
       });
     }
 
     const otp = generateOtp();
     const otpHash = hashOtp(phone, otp);
-
     const now = Date.now();
     const expiresAt = new Date(now + env.OTP_TTL_MINUTES * 60 * 1000);
     const resendAvailableAt = new Date(now + env.OTP_RESEND_COOLDOWN_SECONDS * 1000);
 
-    // Save session before sending SMS so it's ready for verification
     await OtpSession.create({
       phone,
       otpHash,
@@ -106,20 +878,14 @@ export async function requestOtp(req, res, next) {
       userAgent: req.headers['user-agent'] || '',
     });
 
-    // Dispatch SMS via configured provider adapter
     await smsService.sendOtp(phone, otp);
 
     res.json({
       success: true,
       requestId: req.id,
-      message: existingUser
-        ? 'OTP sent successfully. Please sign in to your Khushboo Grocery account.'
-        : 'OTP sent successfully. Welcome to Khushboo Grocery!',
-      isExistingCustomer: Boolean(existingUser),
-      otpLength: env.OTP_LENGTH || 4,
+      message: 'Verification code sent to your phone. Please verify your phone ownership to claim your account.',
       ...(env.NODE_ENV !== 'production' && env.USE_DEV_OTP ? { devOtp: env.DEV_OTP } : {}),
       cooldownSeconds: env.OTP_RESEND_COOLDOWN_SECONDS,
-      expiresInMinutes: env.OTP_TTL_MINUTES,
     });
   } catch (err) {
     next(err);
@@ -127,21 +893,14 @@ export async function requestOtp(req, res, next) {
 }
 
 /**
- * POST /api/v1/auth/otp/verify
- * Verifies a single-use OTP and creates/authenticates the customer.
+ * POST /api/v1/auth/claim/complete
+ * Step 2 of claiming legacy account: verifies OTP, assigns username/email/password,
+ * sends email verification, and preserves existing orders, addresses, and cart.
  */
-export async function verifyOtp(req, res, next) {
+export async function claimLegacyComplete(req, res, next) {
   try {
-    const {
-      phone,
-      otp,
-      privacyConsent,
-      marketingConsent,
-      policyVersion = '1.0',
-      termsVersion = '1.0',
-    } = req.body;
+    const { phone, otp, fullName, username, email, password } = req.body;
 
-    // Find latest unverified session that has not expired
     const session = await OtpSession.findOne({
       phone,
       isVerified: false,
@@ -152,142 +911,102 @@ export async function verifyOtp(req, res, next) {
       return res.status(400).json({
         success: false,
         requestId: req.id,
-        message: 'OTP has expired or no active OTP request exists. Please request a new OTP.',
-      });
-    }
-
-    // Check maximum attempt threshold
-    if (session.attempts >= session.maxAttempts) {
-      return res.status(429).json({
-        success: false,
-        requestId: req.id,
-        message: 'Maximum verification attempts exceeded. Please request a new OTP.',
+        message: 'Verification code has expired. Please request a new code.',
       });
     }
 
     const expectedHash = hashOtp(phone, otp);
-
     if (session.otpHash !== expectedHash) {
       session.attempts += 1;
       await session.save();
-
-      const remaining = session.maxAttempts - session.attempts;
       return res.status(400).json({
         success: false,
         requestId: req.id,
-        message: remaining > 0
-          ? `Invalid OTP. You have ${remaining} attempts remaining.`
-          : 'Invalid OTP. Maximum attempts exceeded. Please request a new OTP.',
+        message: 'Invalid verification code. Please check and try again.',
       });
     }
 
-    // Find customer account
-    let user = await User.findOne({ phone });
-    let isNewCustomer = false;
+    session.isVerified = true;
+    await session.save();
 
-    if (user && (user.role === 'ADMIN' || user.role === 'SUPER_ADMIN')) {
-      return res.status(403).json({
+    const user = await User.findOne({ phone });
+    if (!user) {
+      return res.status(404).json({
         success: false,
         requestId: req.id,
-        message: 'Administrative accounts must sign in through the administrative portal using email and password.',
+        message: 'Legacy account not found.',
       });
     }
 
-    if (!user) {
-      // Mandatory privacy consent required before account creation
-      if (!privacyConsent) {
-        return res.status(400).json({
+    const normalizedEmail = email.toLowerCase().trim();
+    const normalizedUsername = username.toLowerCase().trim();
+
+    // Check for collisions with other users
+    const conflict = await User.findOne({
+      _id: { $ne: user._id },
+      $or: [{ email: normalizedEmail }, { username: normalizedUsername }],
+    });
+
+    if (conflict) {
+      if (conflict.email === normalizedEmail) {
+        return res.status(409).json({
           success: false,
           requestId: req.id,
-          message:
-            'You must read and agree to the Privacy Policy and Terms & Conditions to create an account.',
+          message: 'This email address is already in use by another account.',
         });
       }
-
-      // Mark session as verified (single-use)
-      session.isVerified = true;
-      await session.save();
-
-      user = await User.create({
-        phone,
-        role: 'CUSTOMER',
-        name: 'Grocery Customer',
-        privacyConsent: {
-          agreed: true,
-          agreedAt: new Date(),
-          policyVersion: String(policyVersion),
-          termsVersion: String(termsVersion),
-          ipAddress: req.ip || '',
-          userAgent: req.headers['user-agent'] || '',
-        },
-        marketingConsent: {
-          agreed: Boolean(marketingConsent),
-          agreedAt: marketingConsent ? new Date() : null,
-        },
-      });
-      isNewCustomer = true;
-    } else {
-      // Mark session as verified (single-use)
-      session.isVerified = true;
-      await session.save();
-
-      // Existing user: if consent passed and not recorded yet, update it
-      if (privacyConsent && !user.privacyConsent?.agreed) {
-        user.privacyConsent = {
-          agreed: true,
-          agreedAt: new Date(),
-          policyVersion: String(policyVersion),
-          termsVersion: String(termsVersion),
-          ipAddress: req.ip || '',
-          userAgent: req.headers['user-agent'] || '',
-        };
-      }
-      if (marketingConsent !== undefined) {
-        user.marketingConsent = {
-          agreed: Boolean(marketingConsent),
-          agreedAt: marketingConsent ? new Date() : null,
-        };
-      }
-    }
-
-    if (!user.isActive || user.isDeleted) {
-      return res.status(403).json({
+      return res.status(409).json({
         success: false,
         requestId: req.id,
-        message: user.suspendedReason
-          ? `Your account is suspended: ${user.suspendedReason}. Please contact customer support.`
-          : 'Your account is deactivated or deleted. Please contact customer support.',
+        message: 'This username is already in use by another account.',
       });
     }
 
-    user.lastLoginAt = new Date();
+    // Set new credentials on the existing user record (preserving _id, orders, addresses, cart!)
+    const salt = await bcrypt.genSalt(12);
+    user.fullName = fullName;
+    user.name = fullName;
+    user.username = normalizedUsername;
+    user.email = normalizedEmail;
+    user.password = await bcrypt.hash(password, salt);
+    user.legacyAccountRequiresSetup = false;
+    user.isEmailVerified = false;
+
+    // Generate email verification token
+    const rawVerificationToken = generateSecureToken(32);
+    user.emailVerificationTokenHash = hashToken(rawVerificationToken);
+    user.emailVerificationExpires = new Date(Date.now() + 30 * 60 * 1000);
+
     await user.save();
 
-    const tokenPayload = {
-      id: user._id.toString(),
-      role: user.role,
-      phone: user.phone,
-      sessionVersion: user.sessionVersion || 1,
-    };
+    try {
+      await sendVerificationEmail(normalizedEmail, fullName, rawVerificationToken);
+    } catch (e) {
+      console.error('[auth:claimLegacyComplete] Verification email error:', e.message);
+    }
 
-    const token = generateToken(tokenPayload);
-    setAuthCookie(res, token);
+    await AuditLog.create({
+      action: 'LEGACY_ACCOUNT_CLAIMED',
+      performedBy: user._id,
+      performerRole: user.role,
+      targetType: 'User',
+      targetId: user._id.toString(),
+      details: { email: normalizedEmail, username: normalizedUsername },
+      ipAddress: req.ip || '',
+      requestId: req.id,
+    });
 
     res.json({
       success: true,
       requestId: req.id,
-      message: isNewCustomer ? 'Welcome to Khushboo Food Service!' : 'Login successful.',
-      isNewCustomer,
-      user: user.toSafeObject(),
-      token,
+      message: 'Account successfully upgraded! A verification link has been sent to your new email address. Please verify your email before logging in.',
     });
   } catch (err) {
     next(err);
   }
 }
 
-// Timing-attack mitigation dummy hash
-const TIMING_SAFE_DUMMY_HASH = '$2a$12$e8Y6BfH8Y8ZzQe9Y8.9QXe3.f3q3bQ3uU7H9O7O8K6Y5U4I3O2P1e';
+// ── 8. ADMIN LOGIN & AUTHENTICATION ─────────────────────────────────────────
 
 /**
  * POST /api/v1/auth/admin/login
@@ -314,10 +1033,8 @@ export async function adminLogin(req, res, next) {
     }).select('+password');
 
     if (!user || !user.isActive || !user.password) {
-      // Execute timing-safe bcrypt compare even if user not found
       await bcrypt.compare(rawPassword, TIMING_SAFE_DUMMY_HASH);
 
-      // Record failed audit attempt
       await AuditLog.create({
         action: 'ADMIN_LOGIN_FAILED',
         performedBy: null,
@@ -374,11 +1091,12 @@ export async function adminLogin(req, res, next) {
       id: user._id.toString(),
       role: user.role,
       phone: user.phone,
+      email: user.email,
       sessionVersion: user.sessionVersion || 1,
     };
 
-    const token = generateToken(tokenPayload);
-    setAuthCookie(res, token);
+    const token = generateAccessToken(tokenPayload);
+    setAuthCookies(res, { accessToken: token, rememberMe: true });
 
     res.json({
       success: true,
@@ -386,11 +1104,14 @@ export async function adminLogin(req, res, next) {
       message: 'Admin authentication successful.',
       user: user.toSafeObject(),
       token,
+      accessToken: token,
     });
   } catch (err) {
     next(err);
   }
 }
+
+// ── 9. CURRENT USER & PROFILE ───────────────────────────────────────────────
 
 /**
  * GET /api/v1/auth/me
@@ -410,13 +1131,12 @@ export async function getCurrentUser(req, res) {
  */
 export async function updateProfile(req, res, next) {
   try {
-    const { name, email, avatar, soundEnabled } = req.body;
+    const { name, fullName, avatar, soundEnabled } = req.body;
 
-    if (name !== undefined) {
-      req.user.name = name;
-    }
-    if (email !== undefined) {
-      req.user.email = email || undefined;
+    if (name !== undefined || fullName !== undefined) {
+      const newName = name || fullName;
+      req.user.name = newName;
+      req.user.fullName = newName;
     }
     if (avatar !== undefined) {
       req.user.avatar = avatar;
@@ -462,7 +1182,6 @@ export async function uploadAvatar(req, res, next) {
     req.user.avatar = newAvatarUrl;
     await req.user.save();
 
-    // Clean up previous locally uploaded avatar file if different and unshared
     if (previousAvatar && previousAvatar !== newAvatarUrl && previousAvatar.startsWith('/uploads/')) {
       deleteFile(previousAvatar, { force: false, models: { Product, Category, Banner, User } }).catch(() => {});
     }
@@ -505,6 +1224,8 @@ export async function deleteAvatar(req, res, next) {
   }
 }
 
+// ── 10. ADDRESS MANAGEMENT ──────────────────────────────────────────────────
+
 /**
  * POST /api/v1/auth/addresses
  * Adds a new delivery address for the customer.
@@ -513,7 +1234,6 @@ export async function addAddress(req, res, next) {
   try {
     const addressData = req.body;
 
-    // Validate PIN code format if provided
     if (addressData.pincode && !/^\d{6}$/.test(String(addressData.pincode).trim())) {
       return res.status(400).json({
         success: false,
@@ -522,7 +1242,6 @@ export async function addAddress(req, res, next) {
       });
     }
 
-    // Validate coordinate range if provided
     if (addressData.coordinates) {
       const { lat, lng } = addressData.coordinates;
       if (typeof lat === 'number' && typeof lng === 'number') {
@@ -536,7 +1255,6 @@ export async function addAddress(req, res, next) {
       }
     }
 
-    // If this is the customer's first address or marked default, reset other defaults
     if (req.user.addresses.length === 0 || addressData.isDefault) {
       req.user.addresses.forEach((addr) => {
         addr.isDefault = false;
@@ -567,7 +1285,6 @@ export async function updateAddress(req, res, next) {
     const { id } = req.params;
     const addressUpdates = req.body;
 
-    // Validate PIN code format if provided
     if (addressUpdates.pincode && !/^\d{6}$/.test(String(addressUpdates.pincode).trim())) {
       return res.status(400).json({
         success: false,
@@ -576,7 +1293,6 @@ export async function updateAddress(req, res, next) {
       });
     }
 
-    // Validate coordinate range if provided
     if (addressUpdates.coordinates) {
       const { lat, lng } = addressUpdates.coordinates;
       if (typeof lat === 'number' && typeof lng === 'number') {
@@ -674,7 +1390,6 @@ export async function deleteAddress(req, res, next) {
       });
     }
 
-    // If default was deleted, promote first remaining address to default
     if (req.user.addresses.length > 0 && !req.user.addresses.some((a) => a.isDefault)) {
       req.user.addresses[0].isDefault = true;
     }
@@ -692,22 +1407,10 @@ export async function deleteAddress(req, res, next) {
   }
 }
 
-/**
- * POST /api/v1/auth/logout
- * Clears the auth cookie.
- */
-export function logout(req, res) {
-  clearAuthCookie(res);
-  res.json({
-    success: true,
-    requestId: req.id,
-    message: 'Logged out successfully.',
-  });
-}
+// ── 11. ACCOUNT DELETION COMPLIANCE ─────────────────────────────────────────
 
 /**
  * POST /api/v1/auth/deletion-request
- * Allows an authenticated customer to request account deletion and data anonymization.
  */
 export async function submitDeletionRequest(req, res, next) {
   try {
@@ -741,7 +1444,7 @@ export async function submitDeletionRequest(req, res, next) {
       performerRole: user.role,
       targetType: 'User',
       targetId: user._id.toString(),
-      details: { phone: user.phone, reason },
+      details: { email: user.email, phone: user.phone, reason },
       ipAddress: req.ip || '',
       requestId: req.id,
     });
@@ -760,7 +1463,6 @@ export async function submitDeletionRequest(req, res, next) {
 
 /**
  * GET /api/v1/auth/deletion-request
- * Retrieves the current status of the customer's account deletion request.
  */
 export async function getDeletionRequestStatus(req, res, next) {
   try {
@@ -777,3 +1479,218 @@ export async function getDeletionRequestStatus(req, res, next) {
   }
 }
 
+// ── 12. BACKWARD-COMPATIBLE PHONE OTP (Preserved for compatibility) ─────────
+
+/**
+ * POST /api/v1/auth/otp/request
+ * Retained for backward-compatibility with test suites and legacy integrations.
+ */
+export async function requestOtp(req, res, next) {
+  try {
+    const { phone } = req.body;
+
+    const existingUser = await User.findOne({ phone });
+    if (existingUser && (existingUser.role === 'ADMIN' || existingUser.role === 'SUPER_ADMIN')) {
+      return res.status(403).json({
+        success: false,
+        requestId: req.id,
+        message: 'Administrative accounts must sign in through the administrative portal using email and password.',
+      });
+    }
+
+    if (existingUser && (!existingUser.isActive || existingUser.isDeleted)) {
+      return res.status(403).json({
+        success: false,
+        requestId: req.id,
+        message: existingUser.suspendedReason
+          ? `Your account is suspended: ${existingUser.suspendedReason}. Please contact customer support.`
+          : 'Your account is deactivated or deleted. Please contact customer support.',
+      });
+    }
+
+    const recentSession = await OtpSession.findOne({
+      phone,
+      isVerified: false,
+      expiresAt: { $gt: new Date() },
+    }).sort({ createdAt: -1 });
+
+    if (recentSession && recentSession.resendAvailableAt > new Date()) {
+      const waitSeconds = Math.ceil(
+        (recentSession.resendAvailableAt.getTime() - Date.now()) / 1000
+      );
+      return res.status(429).json({
+        success: false,
+        requestId: req.id,
+        message: `Please wait ${waitSeconds} seconds before requesting a new OTP.`,
+        cooldownRemainingSeconds: waitSeconds,
+      });
+    }
+
+    const otp = generateOtp();
+    const otpHash = hashOtp(phone, otp);
+
+    const now = Date.now();
+    const expiresAt = new Date(now + env.OTP_TTL_MINUTES * 60 * 1000);
+    const resendAvailableAt = new Date(now + env.OTP_RESEND_COOLDOWN_SECONDS * 1000);
+
+    await OtpSession.create({
+      phone,
+      otpHash,
+      attempts: 0,
+      maxAttempts: env.OTP_MAX_ATTEMPTS,
+      isVerified: false,
+      expiresAt,
+      resendAvailableAt,
+      ipAddress: req.ip || '',
+      userAgent: req.headers['user-agent'] || '',
+    });
+
+    await smsService.sendOtp(phone, otp);
+
+    res.json({
+      success: true,
+      requestId: req.id,
+      message: existingUser
+        ? 'OTP sent successfully. Please sign in to your Khushboo Grocery account.'
+        : 'OTP sent successfully. Welcome to Khushboo Grocery!',
+      isExistingCustomer: Boolean(existingUser),
+      otpLength: env.OTP_LENGTH || 4,
+      ...(env.NODE_ENV !== 'production' && env.USE_DEV_OTP ? { devOtp: env.DEV_OTP } : {}),
+      cooldownSeconds: env.OTP_RESEND_COOLDOWN_SECONDS,
+      expiresInMinutes: env.OTP_TTL_MINUTES,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * POST /api/v1/auth/otp/verify
+ * Retained for backward-compatibility with test suites and legacy integrations.
+ */
+export async function verifyOtp(req, res, next) {
+  try {
+    const {
+      phone,
+      otp,
+      privacyConsent,
+      marketingConsent,
+      policyVersion = '1.0',
+      termsVersion = '1.0',
+    } = req.body;
+
+    const session = await OtpSession.findOne({
+      phone,
+      isVerified: false,
+      expiresAt: { $gt: new Date() },
+    }).sort({ createdAt: -1 });
+
+    if (!session) {
+      return res.status(400).json({
+        success: false,
+        requestId: req.id,
+        message: 'OTP has expired or no active OTP request exists. Please request a new OTP.',
+      });
+    }
+
+    if (session.attempts >= session.maxAttempts) {
+      return res.status(429).json({
+        success: false,
+        requestId: req.id,
+        message: 'Maximum verification attempts exceeded. Please request a new OTP.',
+      });
+    }
+
+    const expectedHash = hashOtp(phone, otp);
+
+    if (session.otpHash !== expectedHash) {
+      session.attempts += 1;
+      await session.save();
+
+      const remaining = session.maxAttempts - session.attempts;
+      return res.status(400).json({
+        success: false,
+        requestId: req.id,
+        message: remaining > 0
+          ? `Invalid OTP. You have ${remaining} attempts remaining.`
+          : 'Invalid OTP. Maximum attempts exceeded. Please request a new OTP.',
+      });
+    }
+
+    let user = await User.findOne({ phone });
+    let isNewCustomer = false;
+
+    if (user && (user.role === 'ADMIN' || user.role === 'SUPER_ADMIN')) {
+      return res.status(403).json({
+        success: false,
+        requestId: req.id,
+        message: 'Administrative accounts must sign in through the administrative portal using email and password.',
+      });
+    }
+
+    if (!user) {
+      session.isVerified = true;
+      await session.save();
+
+      user = await User.create({
+        phone,
+        role: 'CUSTOMER',
+        name: 'Grocery Customer',
+        fullName: 'Grocery Customer',
+        legacyAccountRequiresSetup: true, // Requires setup to add email/password
+        isEmailVerified: false,
+        privacyConsent: {
+          agreed: true,
+          agreedAt: new Date(),
+          policyVersion: String(policyVersion),
+          termsVersion: String(termsVersion),
+          ipAddress: req.ip || '',
+          userAgent: req.headers['user-agent'] || '',
+        },
+        marketingConsent: {
+          agreed: Boolean(marketingConsent),
+          agreedAt: marketingConsent ? new Date() : null,
+        },
+      });
+      isNewCustomer = true;
+    } else {
+      session.isVerified = true;
+      await session.save();
+    }
+
+    if (!user.isActive || user.isDeleted) {
+      return res.status(403).json({
+        success: false,
+        requestId: req.id,
+        message: user.suspendedReason
+          ? `Your account is suspended: ${user.suspendedReason}. Please contact customer support.`
+          : 'Your account is deactivated or deleted. Please contact customer support.',
+      });
+    }
+
+    user.lastLoginAt = new Date();
+    await user.save();
+
+    const tokenPayload = {
+      id: user._id.toString(),
+      role: user.role,
+      phone: user.phone,
+      sessionVersion: user.sessionVersion || 1,
+    };
+
+    const token = generateAccessToken(tokenPayload);
+    setAuthCookies(res, { accessToken: token, rememberMe: true });
+
+    res.json({
+      success: true,
+      requestId: req.id,
+      message: isNewCustomer ? 'Welcome to Khushboo Food Service!' : 'Login successful.',
+      isNewCustomer,
+      user: user.toSafeObject(),
+      token,
+      accessToken: token,
+    });
+  } catch (err) {
+    next(err);
+  }
+}

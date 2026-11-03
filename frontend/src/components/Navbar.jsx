@@ -411,7 +411,9 @@ export function Navbar({ onOpenAuth }) {
                       </div>
                       <div className="min-w-0 flex-1">
                         <p className="font-bold text-text-main truncate">{user?.name}</p>
-                        <p className="text-[11px] text-text-muted font-mono truncate">{user?.phone}</p>
+                        <p className="text-[11px] text-text-muted truncate">
+                          {user?.email || user?.phone}
+                        </p>
                         <span className="inline-block mt-0.5 text-[9px] px-2 py-0.5 rounded-full bg-brand-light text-brand font-bold uppercase tracking-wider">
                           {user?.role}
                         </span>

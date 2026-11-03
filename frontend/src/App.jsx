@@ -33,6 +33,15 @@ import { CartPage } from './pages/CartPage.jsx';
 import { ProductDetailPage } from './pages/ProductDetailPage.jsx';
 import { SkeletonDashboard } from './components/skeleton/index.js';
 
+// Dedicated Authentication Pages
+import { LoginPage } from './pages/auth/LoginPage.jsx';
+import { RegisterPage } from './pages/auth/RegisterPage.jsx';
+import { VerifyEmailPage } from './pages/auth/VerifyEmailPage.jsx';
+import { VerifyEmailPendingPage } from './pages/auth/VerifyEmailPendingPage.jsx';
+import { ForgotPasswordPage } from './pages/auth/ForgotPasswordPage.jsx';
+import { ResetPasswordPage } from './pages/auth/ResetPasswordPage.jsx';
+import { ClaimAccountPage } from './pages/auth/ClaimAccountPage.jsx';
+
 // Lazy-loaded Legal & Secondary Content
 const PrivacyPolicyPage = React.lazy(() =>
   import('./pages/PrivacyPolicyPage.jsx').then((m) => ({ default: m.PrivacyPolicyPage }))
@@ -166,6 +175,14 @@ export default function App() {
                   {/* Customer Storefront Routes */}
                   <Route element={<StorefrontLayout onOpenAuth={() => setIsAuthOpen(true)} />}>
                     <Route path="/" element={<StorefrontHomeRoute onOpenAuth={() => setIsAuthOpen(true)} />} />
+                    <Route path="/login" element={<LoginPage />} />
+                    <Route path="/register" element={<RegisterPage />} />
+                    <Route path="/signup" element={<RegisterPage />} />
+                    <Route path="/verify-email" element={<VerifyEmailPage />} />
+                    <Route path="/verify-email-pending" element={<VerifyEmailPendingPage />} />
+                    <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+                    <Route path="/reset-password" element={<ResetPasswordPage />} />
+                    <Route path="/claim-account" element={<ClaimAccountPage />} />
                     <Route path="/categories" element={<CategoriesPage />} />
                     <Route path="/categories/:slug" element={<CategoryDetailPage />} />
                     <Route path="/products/:slug" element={<ProductDetailPage />} />

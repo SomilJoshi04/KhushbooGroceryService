@@ -8,6 +8,7 @@
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
     "admin:bootstrap": "node scripts/bootstrapAdmin.js",
+    "migrate:legacy": "node scripts/migrateLegacyAccounts.js",
     "test": "node ../development-files/tests/verify_all.js"
   },
   "keywords": [
@@ -30,6 +31,7 @@
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^9.11.4",
     "multer": "^2.5.0",
+    "nodemailer": "^10.3.1",
     "socket.io": "^4.8.4",
     "uuid": "^14.0.3",
     "zod": "^4.6.7"

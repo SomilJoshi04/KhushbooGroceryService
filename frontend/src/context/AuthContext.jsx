@@ -1,12 +1,13 @@
 /**
  * Authentication Context for Frontend.
  *
- * Manages customer session (Phone OTP) and administrator login state.
+ * Manages customer session (Email, Username & Password),
+ * administrator login state, rotating token refresh, and profile management.
  *
  * @module context/AuthContext
  */
 
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { apiClient } from '../config/api.js';
 
 const AuthContext = createContext(null);
@@ -18,6 +19,8 @@ export function AuthProvider({ children }) {
   const [isPreviewMode, setIsPreviewMode] = useState(() => {
     return typeof window !== 'undefined' && sessionStorage.getItem('khushboo_admin_preview') === 'true';
   });
+
+  const isRefreshingRef = useRef(false);
 
   const enterPreviewMode = () => {
     if (typeof window !== 'undefined') {
@@ -44,13 +47,30 @@ export function AuthProvider({ children }) {
     }
   }, [token]);
 
-  // Load current user profile from backend on startup
+  // Load current user profile from backend on startup or token refresh
   useEffect(() => {
     async function loadUser() {
       if (!token) {
-        setLoading(false);
+        // Try silent refresh from HttpOnly cookie first
+        try {
+          const refreshRes = await apiClient.post('/auth/refresh');
+          if (refreshRes.data?.success && refreshRes.data?.token) {
+            setToken(refreshRes.data.token);
+            const userRes = await apiClient.get('/auth/me', {
+              headers: { Authorization: `Bearer ${refreshRes.data.token}` },
+            });
+            if (userRes.data?.success && userRes.data?.user) {
+              setUser(userRes.data.user);
+            }
+          }
+        } catch {
+          // No active session cookie
+        } finally {
+          setLoading(false);
+        }
         return;
       }
+
       try {
         const res = await apiClient.get('/auth/me');
         if (res.data?.success && res.data?.user) {
@@ -60,42 +80,126 @@ export function AuthProvider({ children }) {
           setUser(null);
         }
       } catch {
-        // Token invalid or expired
-        setToken(null);
-        setUser(null);
+        // Token might be expired, attempt a refresh
+        try {
+          const refreshRes = await apiClient.post('/auth/refresh');
+          if (refreshRes.data?.success && refreshRes.data?.token) {
+            setToken(refreshRes.data.token);
+            const userRes = await apiClient.get('/auth/me', {
+              headers: { Authorization: `Bearer ${refreshRes.data.token}` },
+            });
+            if (userRes.data?.success && userRes.data?.user) {
+              setUser(userRes.data.user);
+            }
+          } else {
+            setToken(null);
+            setUser(null);
+          }
+        } catch {
+          setToken(null);
+          setUser(null);
+        }
       } finally {
         setLoading(false);
       }
     }
+
     loadUser();
-  }, [token]);
+  }, []);
 
   /**
-   * Request OTP for customer phone
+   * Customer Registration
    */
-  const requestOtp = async (phone) => {
-    const res = await apiClient.post('/auth/otp/request', { phone });
+  const register = async (registrationData) => {
+    const res = await apiClient.post('/auth/register', registrationData);
     return res.data;
   };
 
   /**
-   * Verify customer OTP and log in
-   * Accepts optional consentData { privacyConsent, marketingConsent, policyVersion, termsVersion }
+   * Customer / Unified Login (Email OR Username + Password)
    */
-  const verifyOtp = async (phone, otp, consentData = {}) => {
-    const payload = {
-      phone,
-      otp,
-      privacyConsent: consentData.privacyConsent !== undefined ? Boolean(consentData.privacyConsent) : undefined,
-      marketingConsent: consentData.marketingConsent !== undefined ? Boolean(consentData.marketingConsent) : undefined,
-      policyVersion: consentData.policyVersion || '1.0',
-      termsVersion: consentData.termsVersion || '1.0',
-    };
-    const res = await apiClient.post('/auth/otp/verify', payload);
+  const login = async (identifierOrEmail, password, rememberMe = false) => {
+    const res = await apiClient.post('/auth/login', {
+      identifier: identifierOrEmail,
+      email: identifierOrEmail,
+      password,
+      rememberMe,
+    });
     if (res.data?.success && res.data?.token) {
+      if (typeof window !== 'undefined') {
+        sessionStorage.removeItem('khushboo_admin_preview');
+      }
+      setIsPreviewMode(false);
       setToken(res.data.token);
       setUser(res.data.user);
     }
+    return res.data;
+  };
+
+  /**
+   * Verify Email Link
+   */
+  const verifyEmail = async (verificationToken) => {
+    const res = await apiClient.post('/auth/verify-email', { token: verificationToken });
+    return res.data;
+  };
+
+  /**
+   * Resend Verification Email
+   */
+  const resendVerification = async (email) => {
+    const res = await apiClient.post('/auth/resend-verification', { email });
+    return res.data;
+  };
+
+  /**
+   * Request Password Reset Email
+   */
+  const forgotPassword = async (email) => {
+    const res = await apiClient.post('/auth/forgot-password', { email });
+    return res.data;
+  };
+
+  /**
+   * Reset Password with Token
+   */
+  const resetPassword = async (resetToken, newPassword, confirmPassword) => {
+    const res = await apiClient.post('/auth/reset-password', {
+      token: resetToken,
+      newPassword,
+      confirmPassword,
+    });
+    return res.data;
+  };
+
+  /**
+   * Authenticated Password Change
+   */
+  const changePassword = async (currentPassword, newPassword, confirmPassword) => {
+    const res = await apiClient.post('/auth/change-password', {
+      currentPassword,
+      newPassword,
+      confirmPassword,
+    });
+    if (res.data?.success && res.data?.token) {
+      setToken(res.data.token);
+    }
+    return res.data;
+  };
+
+  /**
+   * Legacy Phone Account Claim: Step 1 (Request OTP)
+   */
+  const claimLegacyRequestOtp = async (phone) => {
+    const res = await apiClient.post('/auth/claim/request-otp', { phone });
+    return res.data;
+  };
+
+  /**
+   * Legacy Phone Account Claim: Step 2 (Complete Migration)
+   */
+  const claimLegacyComplete = async (claimData) => {
+    const res = await apiClient.post('/auth/claim/complete', claimData);
     return res.data;
   };
 
@@ -109,6 +213,31 @@ export function AuthProvider({ children }) {
         sessionStorage.removeItem('khushboo_admin_preview');
       }
       setIsPreviewMode(false);
+      setToken(res.data.token);
+      setUser(res.data.user);
+    }
+    return res.data;
+  };
+
+  /**
+   * Backward-compatible OTP helpers (for tests & legacy components)
+   */
+  const requestOtp = async (phone) => {
+    const res = await apiClient.post('/auth/otp/request', { phone });
+    return res.data;
+  };
+
+  const verifyOtp = async (phone, otp, consentData = {}) => {
+    const payload = {
+      phone,
+      otp,
+      privacyConsent: consentData.privacyConsent !== undefined ? Boolean(consentData.privacyConsent) : undefined,
+      marketingConsent: consentData.marketingConsent !== undefined ? Boolean(consentData.marketingConsent) : undefined,
+      policyVersion: consentData.policyVersion || '1.0',
+      termsVersion: consentData.termsVersion || '1.0',
+    };
+    const res = await apiClient.post('/auth/otp/verify', payload);
+    if (res.data?.success && res.data?.token) {
       setToken(res.data.token);
       setUser(res.data.user);
     }
@@ -132,7 +261,7 @@ export function AuthProvider({ children }) {
   };
 
   /**
-   * Update personal profile (name, email)
+   * Update personal profile (name, avatar, sound)
    */
   const updateProfile = async (profileData) => {
     const res = await apiClient.patch('/auth/profile', profileData);
@@ -231,6 +360,23 @@ export function AuthProvider({ children }) {
     setUser(null);
   };
 
+  /**
+   * Logout from all devices
+   */
+  const logoutAll = async () => {
+    try {
+      await apiClient.post('/auth/logout-all');
+    } catch {
+      // Ignore network errors
+    }
+    if (typeof window !== 'undefined') {
+      sessionStorage.removeItem('khushboo_admin_preview');
+    }
+    setIsPreviewMode(false);
+    setToken(null);
+    setUser(null);
+  };
+
   const isAuthenticated = Boolean(user);
   const isAdmin = Boolean(user && (user.role === 'ADMIN' || user.role === 'SUPER_ADMIN'));
   const isSuperAdmin = Boolean(user && user.role === 'SUPER_ADMIN');
@@ -247,6 +393,15 @@ export function AuthProvider({ children }) {
         isPreviewMode,
         enterPreviewMode,
         exitPreviewMode,
+        register,
+        login,
+        verifyEmail,
+        resendVerification,
+        forgotPassword,
+        resetPassword,
+        changePassword,
+        claimLegacyRequestOtp,
+        claimLegacyComplete,
         requestOtp,
         verifyOtp,
         adminLogin,
@@ -261,6 +416,7 @@ export function AuthProvider({ children }) {
         submitDeletionRequest,
         getDeletionRequestStatus,
         logout,
+        logoutAll,
       }}
     >
       {children}

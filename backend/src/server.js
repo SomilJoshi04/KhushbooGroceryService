@@ -16,7 +16,14 @@
  */
 
 // ── 1. Environment (MUST be first) ────────────────────────────────────────────
-import 'dotenv/config';           // loads backend/.env (dotenv 18.x ES-module style)
+import dotenv from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+dotenv.config({ path: path.resolve(__dirname, '../.env') });
+
 import { env } from './config/env.js';    // validates and exports typed env
 
 // ── Core imports ───────────────────────────────────────────────────────────────
@@ -48,11 +55,6 @@ import bannerRoutes from './routes/bannerRoutes.js';
 import cartRoutes from './routes/cartRoutes.js';
 import notificationRoutes from './routes/notificationRoutes.js';
 import { ensureInitialAdminBootstrap } from './services/adminBootstrapService.js';
-import path from 'path';
-import { fileURLToPath } from 'url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // App instance

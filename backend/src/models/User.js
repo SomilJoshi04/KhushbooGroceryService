@@ -2,7 +2,7 @@
  * User Model — handles both Customers and Administrators.
  *
  * Roles:
- * - CUSTOMER: standard consumer purchasing groceries (authenticated via phone OTP).
+ * - CUSTOMER: standard consumer purchasing groceries (authenticated via Email, Username & Password).
  * - STAFF: view-only or restricted order processing.
  * - ADMIN: full operational dashboard access.
  * - SUPER_ADMIN: complete access including administrative user management.
@@ -103,12 +103,11 @@ const userSchema = new mongoose.Schema(
   {
     phone: {
       type: String,
-      required: [true, 'Phone number is required'],
-      unique: true,
+      required: false,
       trim: true,
-      index: true,
       validate: {
         validator: function (v) {
+          if (!v) return true; // Phone is optional now, preserved for delivery communication
           if (this?.isDeleted || (typeof v === 'string' && (v.startsWith('ANON_') || v.startsWith('+9100000')))) {
             return true;
           }
@@ -117,18 +116,29 @@ const userSchema = new mongoose.Schema(
         message: 'Please enter a valid Indian mobile number (+91XXXXXXXXXX)',
       },
     },
+    fullName: {
+      type: String,
+      trim: true,
+      maxlength: [100, 'Full name cannot exceed 100 characters'],
+    },
     name: {
       type: String,
       trim: true,
       default: 'Grocery Customer',
       maxlength: [100, 'Name cannot exceed 100 characters'],
     },
+    username: {
+      type: String,
+      trim: true,
+      lowercase: true,
+      minlength: [3, 'Username must be at least 3 characters'],
+      maxlength: [30, 'Username cannot exceed 30 characters'],
+      match: [/^[a-zA-Z0-9_.]+$/, 'Username can only contain letters, numbers, underscores, and periods'],
+    },
     email: {
       type: String,
       trim: true,
       lowercase: true,
-      sparse: true,
-      index: true,
       match: [/^[^\s@]+@[^\s@]+\.[^\s@]+$/, 'Please enter a valid email address'],
     },
     avatar: {
@@ -142,11 +152,64 @@ const userSchema = new mongoose.Schema(
       default: 'CUSTOMER',
       index: true,
     },
-    // Used strictly for Admin/Staff portal credentials. Customers authenticate via Phone OTP.
+    // Hashed with bcrypt (cost factor 12) for all user accounts
     password: {
       type: String,
       select: false,
     },
+    // Email verification state & cryptographic token hash
+    isEmailVerified: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    emailVerificationTokenHash: {
+      type: String,
+      select: false,
+      default: null,
+    },
+    emailVerificationExpires: {
+      type: Date,
+      default: null,
+    },
+    // Password recovery state & cryptographic token hash
+    passwordResetTokenHash: {
+      type: String,
+      select: false,
+      default: null,
+    },
+    passwordResetExpires: {
+      type: Date,
+      default: null,
+    },
+    passwordChangedAt: {
+      type: Date,
+      default: null,
+    },
+    // Security & Anti-Brute-Force
+    failedLoginAttempts: {
+      type: Number,
+      default: 0,
+    },
+    lockUntil: {
+      type: Date,
+      default: null,
+    },
+    // Existing SMS-OTP accounts flagged for migration to email/username/password
+    legacyAccountRequiresSetup: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    // Active rotating refresh token sessions
+    refreshTokens: [
+      {
+        tokenId: { type: String, required: true },
+        tokenHash: { type: String, required: true },
+        expiresAt: { type: Date, required: true },
+        createdAt: { type: Date, default: Date.now },
+      },
+    ],
     isActive: {
       type: Boolean,
       default: true,
@@ -242,15 +305,32 @@ const userSchema = new mongoose.Schema(
   }
 );
 
-// Method to return safe JSON without sensitive fields
+// Keep fullName and name synchronized
+userSchema.pre('save', function () {
+  if (this.fullName && !this.name) {
+    this.name = this.fullName;
+  } else if (this.name && !this.fullName) {
+    this.fullName = this.name;
+  }
+});
+
+// Method to return safe JSON without sensitive fields or internal hashes
 userSchema.methods.toSafeObject = function () {
   const obj = this.toObject();
   delete obj.password;
+  delete obj.emailVerificationTokenHash;
+  delete obj.passwordResetTokenHash;
+  delete obj.refreshTokens;
   delete obj.__v;
+  obj.fullName = obj.fullName || obj.name;
   return obj;
 };
 
 userSchema.index({ role: 1, isActive: 1, isDeleted: 1, createdAt: -1, _id: -1 });
 userSchema.index({ role: 1, createdAt: -1, _id: -1 });
+userSchema.index({ email: 1 }, { unique: true, sparse: true });
+userSchema.index({ username: 1 }, { unique: true, sparse: true });
+userSchema.index({ phone: 1 }, { unique: true, sparse: true });
+userSchema.index({ 'refreshTokens.tokenHash': 1 });
 
 export const User = mongoose.model('User', userSchema);

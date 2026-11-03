@@ -108,7 +108,7 @@ export function GuestAuthPromptModal({ isOpen, onClose, onSignIn, pendingAction 
 
         {/* Micro Guarantee Note */}
         <p className="text-[11px] text-text-muted text-center mt-4">
-          Quick & secure mobile login • Free delivery on orders above ₹499
+          Fast & secure grocery account • Free delivery on orders above ₹499
         </p>
       </div>
     </div>

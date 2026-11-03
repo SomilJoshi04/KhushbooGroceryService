@@ -1,7 +1,8 @@
 /**
  * Authentication and User Routes.
  *
- * Implements strict per-route rate limits and Zod schema validation.
+ * Implements strict per-route rate limits, Zod schema validation,
+ * and secure credential handling.
  *
  * @module routes/authRoutes
  */
@@ -9,8 +10,18 @@
 import express from 'express';
 import { rateLimit } from 'express-rate-limit';
 import {
-  requestOtp,
-  verifyOtp,
+  register,
+  verifyEmail,
+  resendVerification,
+  login,
+  refreshToken,
+  logout,
+  logoutAll,
+  forgotPassword,
+  resetPassword,
+  changePassword,
+  claimLegacyRequestOtp,
+  claimLegacyComplete,
   adminLogin,
   getCurrentUser,
   updateProfile,
@@ -20,57 +31,107 @@ import {
   updateAddress,
   deleteAddress,
   setDefaultAddress,
-  logout,
   submitDeletionRequest,
   getDeletionRequestStatus,
+  requestOtp,
+  verifyOtp,
 } from '../controllers/authController.js';
 import { requireAuth } from '../middleware/auth.js';
 import { validate } from '../middleware/validate.js';
 import { multerUpload, validateUploadedFileMagicBytes } from '../middleware/upload.js';
 import {
-  requestOtpSchema,
-  verifyOtpSchema,
+  registerSchema,
+  loginSchema,
+  verifyEmailSchema,
+  resendVerificationSchema,
+  forgotPasswordSchema,
+  resetPasswordSchema,
+  changePasswordSchema,
+  claimLegacyRequestOtpSchema,
+  claimLegacyCompleteSchema,
   adminLoginSchema,
   updateProfileSchema,
   addressSchema,
   deletionRequestSchema,
+  requestOtpSchema,
+  verifyOtpSchema,
 } from '../validation/authSchemas.js';
-
-import {
-  STORAGE_SUBFOLDERS,
-} from '../services/fileStorageService.js';
-
+import { STORAGE_SUBFOLDERS } from '../services/fileStorageService.js';
 import { env } from '../config/env.js';
 
 const router = express.Router();
 
-// ── Rate Limiters for Sensitive Auth Endpoints ───────────────────────────────
+// ── Rate Limiters for Sensitive Endpoints ───────────────────────────────────
 
-const otpRequestLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: env.NODE_ENV === 'production' ? 5 : 100, // Max 5 in prod, relaxed in dev/test
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: {
-    success: false,
-    message: 'Too many OTP requests. Please wait a while before requesting again.',
-  },
-});
-
-const otpVerifyLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
+const registerLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
   max: env.NODE_ENV === 'production' ? 10 : 200,
   standardHeaders: true,
   legacyHeaders: false,
   message: {
     success: false,
-    message: 'Too many verification attempts. Please wait 15 minutes before trying again.',
+    message: 'Too many account creation attempts from this IP. Please try again after an hour.',
+  },
+});
+
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: env.NODE_ENV === 'production' ? 15 : 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    success: false,
+    message: 'Too many login attempts. Please wait 15 minutes before trying again.',
+  },
+});
+
+const verifyEmailLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: env.NODE_ENV === 'production' ? 20 : 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    success: false,
+    message: 'Too many verification attempts. Please wait a while before trying again.',
+  },
+});
+
+const resendVerificationLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: env.NODE_ENV === 'production' ? 5 : 50,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    success: false,
+    message: 'Too many resend verification requests. Please check your inbox and spam folders.',
+  },
+});
+
+const passwordRecoveryLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: env.NODE_ENV === 'production' ? 5 : 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    success: false,
+    message: 'Too many password reset requests. Please check your email or try again later.',
+  },
+});
+
+const claimLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: env.NODE_ENV === 'production' ? 10 : 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    success: false,
+    message: 'Too many account claim attempts. Please wait before trying again.',
   },
 });
 
 const adminLoginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: env.NODE_ENV === 'production' ? 5 : 50, // Strict anti-brute-force on admin portal
+  max: env.NODE_ENV === 'production' ? 5 : 50,
   standardHeaders: true,
   legacyHeaders: false,
   message: {
@@ -90,9 +151,28 @@ const avatarUploadLimiter = rateLimit({
   },
 });
 
-/**
- * Helper middleware wrapping multer for profile avatar upload.
- */
+const otpRequestLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: env.NODE_ENV === 'production' ? 5 : 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    success: false,
+    message: 'Too many OTP requests. Please wait a while before requesting again.',
+  },
+});
+
+const otpVerifyLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: env.NODE_ENV === 'production' ? 10 : 200,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    success: false,
+    message: 'Too many verification attempts. Please wait 15 minutes before trying again.',
+  },
+});
+
 function handleAvatarMulter(req, res, next) {
   const upload = multerUpload.single('avatar');
   upload(req, res, (err) => {
@@ -114,8 +194,85 @@ function handleAvatarMulter(req, res, next) {
   });
 }
 
-// ── Public Auth Routes ────────────────────────────────────────────────────────
+// ── Public Authentication Routes ────────────────────────────────────────────
 
+// 1. Customer Registration
+router.post(
+  '/register',
+  registerLimiter,
+  validate({ body: registerSchema }),
+  register
+);
+
+// 2. Email Verification
+router.post(
+  '/verify-email',
+  verifyEmailLimiter,
+  validate({ body: verifyEmailSchema }),
+  verifyEmail
+);
+router.get('/verify-email', verifyEmailLimiter, verifyEmail);
+
+router.post(
+  '/resend-verification',
+  resendVerificationLimiter,
+  validate({ body: resendVerificationSchema }),
+  resendVerification
+);
+
+// 3. Login
+router.post(
+  '/login',
+  loginLimiter,
+  validate({ body: loginSchema }),
+  login
+);
+
+// 4. Token Refresh
+router.post('/refresh', refreshToken);
+
+// 5. Logout
+router.post('/logout', logout);
+
+// 6. Password Recovery
+router.post(
+  '/forgot-password',
+  passwordRecoveryLimiter,
+  validate({ body: forgotPasswordSchema }),
+  forgotPassword
+);
+
+router.post(
+  '/reset-password',
+  passwordRecoveryLimiter,
+  validate({ body: resetPasswordSchema }),
+  resetPassword
+);
+
+// 7. Legacy Account Claim
+router.post(
+  '/claim/request-otp',
+  claimLimiter,
+  validate({ body: claimLegacyRequestOtpSchema }),
+  claimLegacyRequestOtp
+);
+
+router.post(
+  '/claim/complete',
+  claimLimiter,
+  validate({ body: claimLegacyCompleteSchema }),
+  claimLegacyComplete
+);
+
+// 8. Store Administrator Portal Login
+router.post(
+  '/admin/login',
+  adminLoginLimiter,
+  validate({ body: adminLoginSchema }),
+  adminLogin
+);
+
+// 9. Legacy OTP Routes (Preserved for compatibility)
 router.post(
   '/otp/request',
   otpRequestLimiter,
@@ -130,18 +287,18 @@ router.post(
   verifyOtp
 );
 
-router.post(
-  '/admin/login',
-  adminLoginLimiter,
-  validate({ body: adminLoginSchema }),
-  adminLogin
-);
-
-router.post('/logout', logout);
-
-// ── Authenticated User Routes ─────────────────────────────────────────────────
+// ── Authenticated User Routes ───────────────────────────────────────────────
 
 router.get('/me', requireAuth, getCurrentUser);
+
+router.post('/logout-all', requireAuth, logoutAll);
+
+router.post(
+  '/change-password',
+  requireAuth,
+  validate({ body: changePasswordSchema }),
+  changePassword
+);
 
 router.patch(
   '/profile',
@@ -166,11 +323,7 @@ router.post(
   uploadAvatar
 );
 
-router.delete(
-  '/profile/avatar',
-  requireAuth,
-  deleteAvatar
-);
+router.delete('/profile/avatar', requireAuth, deleteAvatar);
 
 router.post(
   '/addresses',
@@ -186,21 +339,17 @@ router.put(
   updateAddress
 );
 
-router.patch(
-  '/addresses/:id/default',
-  requireAuth,
-  setDefaultAddress
-);
+router.patch('/addresses/:id/default', requireAuth, setDefaultAddress);
 
 router.delete('/addresses/:id', requireAuth, deleteAddress);
 
-// Account deletion request (Customer self-service compliance endpoint)
 router.post(
   '/deletion-request',
   requireAuth,
   validate({ body: deletionRequestSchema }),
   submitDeletionRequest
 );
+
 router.get('/deletion-request', requireAuth, getDeletionRequestStatus);
 
 export default router;

@@ -44,6 +44,10 @@ import {
   Bell,
   ExternalLink,
   CheckCheck,
+  Lock,
+  Key,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import { LocationPickerModal } from '../components/map/LocationPickerModal.jsx';
 import { Pagination } from '../components/Pagination.jsx';
@@ -64,6 +68,8 @@ export function AccountPage({ onOpenAuth }) {
     setDefaultAddress,
     submitDeletionRequest,
     logout,
+    changePassword,
+    logoutAll,
   } = useAuth();
 
   const navigate = useNavigate();
@@ -79,13 +85,70 @@ export function AccountPage({ onOpenAuth }) {
     loading: notifLoading,
   } = useNotifications();
 
-  const ALLOWED_TABS = ['orders', 'addresses', 'profile', 'support', 'notifications'];
+  const ALLOWED_TABS = ['orders', 'addresses', 'profile', 'security', 'support', 'notifications'];
   const searchParams = new URLSearchParams(location.search);
   const initialTab = searchParams.get('tab') || location.state?.tab || 'orders';
 
   const [activeTab, setActiveTab] = useState(
     ALLOWED_TABS.includes(initialTab) ? initialTab : 'orders'
   );
+
+  // Security & Password Change State
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmNewPassword, setConfirmNewPassword] = useState('');
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmNewPassword, setShowConfirmNewPassword] = useState(false);
+  const [passLoading, setPassLoading] = useState(false);
+  const [passSuccess, setPassSuccess] = useState('');
+  const [passError, setPassError] = useState('');
+  const [logoutAllLoading, setLogoutAllLoading] = useState(false);
+  const [logoutAllSuccess, setLogoutAllSuccess] = useState('');
+
+  const handleChangePassword = async (e) => {
+    e.preventDefault();
+    setPassError('');
+    setPassSuccess('');
+
+    if (newPassword.length < 12) {
+      setPassError('New password must contain at least 12 characters.');
+      return;
+    }
+
+    if (newPassword !== confirmNewPassword) {
+      setPassError('New passwords do not match.');
+      return;
+    }
+
+    setPassLoading(true);
+    try {
+      await changePassword(currentPassword, newPassword, confirmNewPassword);
+      setPassSuccess('Your password has been changed successfully!');
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmNewPassword('');
+    } catch (err) {
+      setPassError(err.message || 'Failed to update password. Please check your current password.');
+    } finally {
+      setPassLoading(false);
+    }
+  };
+
+  const handleLogoutAll = async () => {
+    if (!window.confirm('Are you sure you want to log out from all devices? You will need to sign in again.')) {
+      return;
+    }
+    setLogoutAllLoading(true);
+    try {
+      await logoutAll();
+      navigate('/login', { replace: true });
+    } catch (err) {
+      setPassError(err.message || 'Failed to revoke sessions.');
+    } finally {
+      setLogoutAllLoading(false);
+    }
+  };
 
   useEffect(() => {
     const tabParam = new URLSearchParams(location.search).get('tab') || location.state?.tab;
@@ -663,6 +726,18 @@ export function AccountPage({ onOpenAuth }) {
           </button>
 
           <button
+            onClick={() => setActiveTab('security')}
+            className={`pb-3 px-2 flex items-center gap-2 border-b-2 transition whitespace-nowrap ${
+              activeTab === 'security'
+                ? 'border-brand text-brand'
+                : 'border-transparent text-text-muted hover:text-text-main'
+            }`}
+          >
+            <ShieldCheck className="w-4 h-4" />
+            <span>Account Security</span>
+          </button>
+
+          <button
             onClick={() => setActiveTab('support')}
             className={`pb-3 px-2 flex items-center gap-2 border-b-2 transition whitespace-nowrap ${
               activeTab === 'support'
@@ -967,18 +1042,42 @@ export function AccountPage({ onOpenAuth }) {
 
             <form onSubmit={handleProfileSubmit} className="space-y-4">
               <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-xs font-medium text-text-main">
+                    Email Address
+                  </label>
+                  {user?.isEmailVerified ? (
+                    <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                      <CheckCircle2 className="w-3 h-3" />
+                      Verified
+                    </span>
+                  ) : (
+                    <Link
+                      to={`/verify-email-pending?email=${encodeURIComponent(user?.email || '')}`}
+                      className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200 hover:underline"
+                    >
+                      Verify Email &rarr;
+                    </Link>
+                  )}
+                </div>
+                <input
+                  type="email"
+                  disabled
+                  value={user?.email || ''}
+                  className="w-full px-4 py-2.5 bg-surface-subtle border border-border-neutral rounded-xl text-text-muted text-xs cursor-not-allowed"
+                />
+              </div>
+
+              <div>
                 <label className="block text-xs font-medium text-text-main mb-1.5">
-                  Verified Mobile Number
+                  Contact Phone Number (For Deliveries)
                 </label>
                 <input
                   type="text"
                   disabled
-                  value={user?.phone || ''}
+                  value={user?.phone || 'Not linked'}
                   className="w-full px-4 py-2.5 bg-surface-subtle border border-border-neutral rounded-xl text-text-muted text-xs font-mono cursor-not-allowed"
                 />
-                <span className="text-[10px] text-text-muted mt-1 block">
-                  Mobile number is permanently linked to your OTP credentials.
-                </span>
               </div>
 
               <div>
@@ -991,19 +1090,6 @@ export function AccountPage({ onOpenAuth }) {
                   onChange={(e) => setProfileName(e.target.value)}
                   placeholder="Your full name"
                   required
-                  className="w-full px-4 py-2.5 bg-surface border border-border-neutral rounded-xl text-text-main text-xs focus:outline-none focus:border-brand shadow-xs transition"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-text-main mb-1.5">
-                  Email Address (Optional)
-                </label>
-                <input
-                  type="email"
-                  value={profileEmail}
-                  onChange={(e) => setProfileEmail(e.target.value)}
-                  placeholder="name@example.com"
                   className="w-full px-4 py-2.5 bg-surface border border-border-neutral rounded-xl text-text-main text-xs focus:outline-none focus:border-brand shadow-xs transition"
                 />
               </div>
@@ -1215,7 +1301,146 @@ export function AccountPage({ onOpenAuth }) {
           </div>
         )}
 
-        {/* ── Tab 4: Help & Support ────────────────────────────────────────── */}
+        {/* ── Tab: Account Security & Credentials ──────────────────────────── */}
+        {activeTab === 'security' && (
+          <div className="max-w-xl space-y-6">
+            <div className="bg-surface border border-border-neutral rounded-2xl p-6 sm:p-8 space-y-6 shadow-xs">
+              <div>
+                <h2 className="text-lg font-bold font-heading text-text-main">Account Security</h2>
+                <p className="text-xs text-text-muted">Change your account password and manage active device sessions.</p>
+              </div>
+
+              {passSuccess && (
+                <div className="p-3.5 bg-status-success/10 border border-status-success/20 rounded-xl flex items-center gap-2.5 text-xs text-status-success">
+                  <CheckCircle2 className="w-4 h-4 shrink-0" />
+                  <span>{passSuccess}</span>
+                </div>
+              )}
+
+              {passError && (
+                <div className="p-3.5 bg-status-error/10 border border-status-error/20 rounded-xl flex items-center gap-2.5 text-xs text-status-error">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>{passError}</span>
+                </div>
+              )}
+
+              {/* Change Password Form */}
+              <form onSubmit={handleChangePassword} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-semibold text-text-main mb-1.5">
+                    Current Password
+                  </label>
+                  <div className="relative">
+                    <Lock className="w-4 h-4 text-text-muted absolute left-3.5 top-3.5" />
+                    <input
+                      type={showCurrentPassword ? 'text' : 'password'}
+                      value={currentPassword}
+                      onChange={(e) => setCurrentPassword(e.target.value)}
+                      placeholder="••••••••••••"
+                      required
+                      className="w-full pl-10 pr-10 py-2.5 text-xs bg-surface-subtle border border-border-neutral rounded-xl text-text-main focus:outline-none focus:border-brand"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowCurrentPassword(!showCurrentPassword)}
+                      className="absolute right-3.5 top-3 text-text-muted hover:text-text-main"
+                    >
+                      {showCurrentPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-text-main mb-1.5">
+                    New Password
+                  </label>
+                  <div className="relative">
+                    <Lock className="w-4 h-4 text-text-muted absolute left-3.5 top-3.5" />
+                    <input
+                      type={showNewPassword ? 'text' : 'password'}
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      placeholder="••••••••••••"
+                      required
+                      minLength={12}
+                      className="w-full pl-10 pr-10 py-2.5 text-xs bg-surface-subtle border border-border-neutral rounded-xl text-text-main focus:outline-none focus:border-brand"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowNewPassword(!showNewPassword)}
+                      className="absolute right-3.5 top-3 text-text-muted hover:text-text-main"
+                    >
+                      {showNewPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-text-muted mt-1">
+                    Must be at least 12 characters and include uppercase, lowercase, number, and special character.
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-text-main mb-1.5">
+                    Confirm New Password
+                  </label>
+                  <div className="relative">
+                    <Lock className="w-4 h-4 text-text-muted absolute left-3.5 top-3.5" />
+                    <input
+                      type={showConfirmNewPassword ? 'text' : 'password'}
+                      value={confirmNewPassword}
+                      onChange={(e) => setConfirmNewPassword(e.target.value)}
+                      placeholder="••••••••••••"
+                      required
+                      className="w-full pl-10 pr-10 py-2.5 text-xs bg-surface-subtle border border-border-neutral rounded-xl text-text-main focus:outline-none focus:border-brand"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowConfirmNewPassword(!showConfirmNewPassword)}
+                      className="absolute right-3.5 top-3 text-text-muted hover:text-text-main"
+                    >
+                      {showConfirmNewPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={passLoading || !currentPassword || !newPassword || !confirmNewPassword}
+                  className="w-full py-2.5 px-4 bg-brand hover:bg-brand-hover text-white font-semibold text-xs rounded-xl shadow-xs transition disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer mt-2"
+                >
+                  {passLoading ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>Updating Password...</span>
+                    </>
+                  ) : (
+                    <span>Update Password</span>
+                  )}
+                </button>
+              </form>
+
+              {/* Session Management */}
+              <div className="pt-6 border-t border-border-neutral space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <h4 className="font-bold text-xs text-text-main">Session Management</h4>
+                    <p className="text-[11px] text-text-muted mt-0.5">
+                      Sign out of Khushboo Food Service across all browsers, phones, and computers.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleLogoutAll}
+                    disabled={logoutAllLoading}
+                    className="px-3.5 py-2 bg-surface hover:bg-surface-subtle border border-border-neutral text-status-error font-semibold text-xs rounded-xl transition shadow-2xs cursor-pointer self-start sm:self-auto shrink-0 flex items-center gap-1.5"
+                  >
+                    <LogOut className="w-3.5 h-3.5" />
+                    <span>{logoutAllLoading ? 'Revoking...' : 'Sign Out Everywhere'}</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
         {activeTab === 'support' && (
           <div className="space-y-6">
             {/* Verified Contact Channels Cards */}

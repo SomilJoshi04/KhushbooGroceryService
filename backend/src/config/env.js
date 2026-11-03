@@ -8,7 +8,15 @@
  * @module config/env
  */
 
+import dotenv from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { z } from 'zod';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+dotenv.config({ path: path.resolve(__dirname, '../../.env') });
+dotenv.config(); // fallback for current working directory
 
 /** Allowed NODE_ENV values */
 const NODE_ENV_VALUES = ['development', 'test', 'staging', 'production'];
@@ -34,10 +42,15 @@ const envSchema = z.object({
       { message: 'MONGO_URI must start with mongodb:// or mongodb+srv://' }
     ),
 
-  // ── CORS ─────────────────────────────────────────────────────────────────────
+  // ── CORS & Client ───────────────────────────────────────────────────────────
   CLIENT_URL: z
     .string()
     .url('CLIENT_URL must be a valid URL')
+    .default('http://localhost:5173'),
+
+  FRONTEND_URL: z
+    .string()
+    .url('FRONTEND_URL must be a valid URL')
     .default('http://localhost:5173'),
 
   // ── Auth & JWT ──────────────────────────────────────────────────────────────
@@ -48,6 +61,61 @@ const envSchema = z.object({
   JWT_EXPIRES_IN: z
     .string()
     .default('7d'),
+
+  JWT_ACCESS_SECRET: z
+    .string()
+    .min(32, 'JWT_ACCESS_SECRET must be at least 32 characters')
+    .optional(),
+
+  JWT_REFRESH_SECRET: z
+    .string()
+    .min(32, 'JWT_REFRESH_SECRET must be at least 32 characters')
+    .optional(),
+
+  JWT_ACCESS_EXPIRES_IN: z
+    .string()
+    .default('15m'),
+
+  JWT_REFRESH_EXPIRES_IN: z
+    .string()
+    .default('7d'),
+
+  // ── SMTP / Email Service Configuration ──────────────────────────────────────
+  SMTP_HOST: z
+    .string()
+    .optional()
+    .default(''),
+  SMTP_PORT: z
+    .string()
+    .optional()
+    .transform((v) => (!v || !v.trim() ? 587 : parseInt(v.trim(), 10) || 587))
+    .default('587'),
+  SMTP_USER: z
+    .string()
+    .optional()
+    .default(''),
+  SMTP_PASSWORD: z
+    .string()
+    .optional()
+    .default(''),
+  SMTP_FROM_EMAIL: z
+    .string()
+    .optional()
+    .transform((v) => (!v || !v.trim() ? 'noreply@khushboogroceryservice.in' : v.trim()))
+    .refine((v) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v), {
+      message: 'SMTP_FROM_EMAIL must be a valid email',
+    })
+    .default('noreply@khushboogroceryservice.in'),
+  SMTP_FROM_NAME: z
+    .string()
+    .optional()
+    .transform((v) => (!v || !v.trim() ? 'KhushbooFoodService' : v.trim()))
+    .default('KhushbooFoodService'),
+  SMTP_SECURE: z
+    .string()
+    .optional()
+    .transform((v) => v === 'true')
+    .default('false'),
 
   // ── Administrator Credentials ─────────────────────────────────────────────
   ADMIN_EMAIL: z
@@ -231,7 +299,17 @@ function parseEnv() {
     process.exit(1);
   }
 
-  return result.data;
+  const parsed = result.data;
+  if (!parsed.JWT_ACCESS_SECRET) {
+    parsed.JWT_ACCESS_SECRET = parsed.JWT_SECRET;
+  }
+  if (!parsed.JWT_REFRESH_SECRET) {
+    parsed.JWT_REFRESH_SECRET = `${parsed.JWT_SECRET}_refresh_khushboo`;
+  }
+  if (!parsed.FRONTEND_URL) {
+    parsed.FRONTEND_URL = parsed.CLIENT_URL;
+  }
+  return parsed;
 }
 
 export const env = parseEnv();
