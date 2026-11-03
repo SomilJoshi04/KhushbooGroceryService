@@ -13,7 +13,7 @@ import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { apiClient, resolveImageUrl, getApiUploadUrl, NEUTRAL_PRODUCT_PLACEHOLDER } from '../config/api.js';
 import { Search, Grid, ArrowRight, RefreshCw } from 'lucide-react';
-import { SkeletonCategoryGrid } from '../components/skeleton/index.js';
+import { SkeletonCategoryGrid, ImageWithSkeleton } from '../components/skeleton/index.js';
 import { swrCache } from '../utils/swrCache.js';
 
 export function CategoriesPage() {
@@ -133,31 +133,20 @@ export function CategoriesPage() {
                 to={`/categories/${category.slug}`}
                 className="group relative bg-surface border border-border-neutral hover:border-brand/40 rounded-2xl overflow-hidden transition-all duration-300 hover:shadow-sm flex flex-col justify-between"
               >
-                {/* Category Image */}
-                <div className="relative aspect-4/3 w-full bg-surface-subtle overflow-hidden border-b border-border-neutral">
-                  <img
-                    src={resolveImageUrl(category.image) || NEUTRAL_PRODUCT_PLACEHOLDER}
-                    alt={category.name}
-                    className="w-full h-full object-cover group-hover:scale-102 transition duration-500"
-                    loading="lazy"
-                    onError={(e) => {
-                      if (!e.currentTarget.dataset.fallbackAttempted && category.image) {
-                        e.currentTarget.dataset.fallbackAttempted = 'true';
-                        const apiFallback = getApiUploadUrl(category.image);
-                        if (apiFallback && e.currentTarget.src !== apiFallback) {
-                          e.currentTarget.src = apiFallback;
-                          return;
-                        }
-                      }
-                      e.currentTarget.src = NEUTRAL_PRODUCT_PLACEHOLDER;
-                    }}
-                  />
-                  <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between">
+                {/* Category Image with Progressive Skeleton Loading */}
+                <ImageWithSkeleton
+                  src={category.image}
+                  alt={category.name}
+                  aspectRatio="aspect-4/3"
+                  containerClassName="w-full bg-surface-subtle border-b border-border-neutral"
+                  className="w-full h-full object-cover group-hover:scale-102 transition duration-500"
+                >
+                  <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between pointer-events-none z-10">
                     <span className="text-[10px] font-bold uppercase tracking-wider text-brand bg-surface/90 backdrop-blur-xs px-2 py-0.5 rounded border border-border-neutral shadow-xs">
                       100% Pure
                     </span>
                   </div>
-                </div>
+                </ImageWithSkeleton>
 
                 {/* Details */}
                 <div className="p-5 flex-1 flex flex-col justify-between">

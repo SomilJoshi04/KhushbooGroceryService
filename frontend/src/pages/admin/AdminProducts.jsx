@@ -27,7 +27,7 @@ import { Pagination } from '../../components/Pagination.jsx';
 import { useBulkSelection } from '../../hooks/useBulkSelection.js';
 import { BulkActionBar } from '../../components/BulkActionBar.jsx';
 import { BulkConfirmModal } from '../../components/BulkConfirmModal.jsx';
-import { SkeletonTable } from '../../components/skeleton/index.js';
+import { SkeletonTable, ImageWithSkeleton } from '../../components/skeleton/index.js';
 import { swrCache } from '../../utils/swrCache.js';
 
 export function AdminProducts() {
@@ -563,21 +563,12 @@ export function AdminProducts() {
                         />
                       </td>
                       <td className="p-4 flex items-center gap-3">
-                        <img
-                          src={resolveImageUrl(p.images?.[0]) || NEUTRAL_PRODUCT_PLACEHOLDER}
+                        <ImageWithSkeleton
+                          src={p.images?.[0]}
                           alt={p.name}
-                          className="w-12 h-12 rounded-xl object-cover bg-surface-subtle border border-border-neutral shrink-0"
-                          onError={(e) => {
-                            if (!e.currentTarget.dataset.fallbackAttempted) {
-                              e.currentTarget.dataset.fallbackAttempted = 'true';
-                              const apiFallback = getApiUploadUrl(p.images?.[0]);
-                              if (apiFallback) {
-                                e.currentTarget.src = apiFallback;
-                                return;
-                              }
-                            }
-                            e.currentTarget.src = NEUTRAL_PRODUCT_PLACEHOLDER;
-                          }}
+                          aspectRatio="aspect-square"
+                          containerClassName="w-12 h-12 rounded-xl shrink-0 bg-surface-subtle border border-border-neutral overflow-hidden"
+                          className="w-full h-full object-cover rounded-xl"
                         />
                         <div>
                           <span className="font-bold text-text-main block max-w-xs truncate">{p.name}</span>

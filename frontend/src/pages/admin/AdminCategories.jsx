@@ -22,7 +22,7 @@ import {
   EyeOff,
 } from 'lucide-react';
 import { ImageUpload } from '../../components/common/ImageUpload.jsx';
-import { SkeletonCategoryGrid } from '../../components/skeleton/index.js';
+import { SkeletonCategoryGrid, ImageWithSkeleton } from '../../components/skeleton/index.js';
 import { swrCache } from '../../utils/swrCache.js';
 import { resolveImageUrl, getApiUploadUrl, NEUTRAL_PRODUCT_PLACEHOLDER } from '../../config/api.js';
 
@@ -177,27 +177,17 @@ export function AdminCategories() {
               key={cat._id}
               className="bg-surface border border-border-neutral rounded-2xl overflow-hidden flex flex-col justify-between hover:border-brand/30 shadow-xs transition"
             >
-              <div className="relative aspect-4/3 w-full bg-surface-subtle overflow-hidden">
-                <img
-                  src={resolveImageUrl(cat.image) || NEUTRAL_PRODUCT_PLACEHOLDER}
-                  alt={cat.name}
-                  className="w-full h-full object-cover"
-                  onError={(e) => {
-                    if (!e.currentTarget.dataset.fallbackAttempted) {
-                      e.currentTarget.dataset.fallbackAttempted = 'true';
-                      const apiFallback = getApiUploadUrl(cat.image);
-                      if (apiFallback) {
-                        e.currentTarget.src = apiFallback;
-                        return;
-                      }
-                    }
-                    e.currentTarget.src = NEUTRAL_PRODUCT_PLACEHOLDER;
-                  }}
-                />
-                <div className="absolute top-3 left-3 bg-surface/90 backdrop-blur-xs px-2 py-0.5 rounded-lg border border-border-neutral text-[10px] font-mono text-brand font-semibold shadow-xs">
+              <ImageWithSkeleton
+                src={cat.image}
+                alt={cat.name}
+                aspectRatio="aspect-4/3"
+                containerClassName="w-full bg-surface-subtle overflow-hidden"
+                className="w-full h-full object-cover"
+              >
+                <div className="absolute top-3 left-3 bg-surface/90 backdrop-blur-xs px-2 py-0.5 rounded-lg border border-border-neutral text-[10px] font-mono text-brand font-semibold shadow-xs z-10 pointer-events-none">
                   Order #{cat.order}
                 </div>
-                <div className="absolute top-3 right-3">
+                <div className="absolute top-3 right-3 z-10 pointer-events-none">
                   <span
                     className={`px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider ${
                       cat.isActive
@@ -208,7 +198,7 @@ export function AdminCategories() {
                     {cat.isActive ? 'Active' : 'Hidden'}
                   </span>
                 </div>
-              </div>
+              </ImageWithSkeleton>
 
               <div className="p-4 flex-1 flex flex-col justify-between space-y-3">
                 <div>

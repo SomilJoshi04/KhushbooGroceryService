@@ -13,7 +13,7 @@
 import React, { useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, ArrowRight } from 'lucide-react';
-import { SkeletonCategoryCarousel } from './skeleton/index.js';
+import { SkeletonCategoryCarousel, ImageWithSkeleton } from './skeleton/index.js';
 import { resolveImageUrl, getApiUploadUrl, NEUTRAL_PRODUCT_PLACEHOLDER } from '../config/api.js';
 
 export function CategoryCarousel({
@@ -146,22 +146,12 @@ export function CategoryCarousel({
                     : 'border-border-neutral bg-surface hover:border-brand/40'
                 }`}
               >
-                <img
-                  src={resolveImageUrl(cat.image) || NEUTRAL_PRODUCT_PLACEHOLDER}
+                <ImageWithSkeleton
+                  src={cat.image}
                   alt={cat.name}
-                  loading="lazy"
-                  className="w-full h-full object-cover rounded-[10px] bg-surface-subtle"
-                  onError={(e) => {
-                    if (!e.currentTarget.dataset.fallbackAttempted) {
-                      e.currentTarget.dataset.fallbackAttempted = 'true';
-                      const apiFallback = getApiUploadUrl(cat.image);
-                      if (apiFallback) {
-                        e.currentTarget.src = apiFallback;
-                        return;
-                      }
-                    }
-                    e.currentTarget.src = NEUTRAL_PRODUCT_PLACEHOLDER;
-                  }}
+                  aspectRatio="aspect-square"
+                  containerClassName="w-full h-full rounded-[10px] bg-surface-subtle"
+                  className="w-full h-full object-cover rounded-[10px]"
                 />
               </div>
 

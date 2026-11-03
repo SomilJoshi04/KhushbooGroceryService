@@ -14,7 +14,7 @@ import { useParams, Link } from 'react-router-dom';
 import { apiClient } from '../config/api.js';
 import { ProductCard } from '../components/ProductCard.jsx';
 import { ProductDetailModal } from '../components/ProductDetailModal.jsx';
-import { SkeletonProductGrid, SkeletonTitle, SkeletonText, SkeletonBase } from '../components/skeleton/index.js';
+import { SkeletonProductGrid, SkeletonTitle, SkeletonText, SkeletonBase, ImageWithSkeleton } from '../components/skeleton/index.js';
 import { Search, ArrowLeft, ArrowUpDown, ShoppingBag, Grid, RefreshCw } from 'lucide-react';
 
 export function CategoryDetailPage() {
@@ -162,10 +162,13 @@ export function CategoryDetailPage() {
               {/* Category Image Preview Badge */}
               {category?.image && (
                 <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-2xl overflow-hidden border border-border-neutral shrink-0 shadow-sm bg-surface">
-                  <img
+                  <ImageWithSkeleton
                     src={category.image}
                     alt={category.name}
+                    aspectRatio="aspect-square"
+                    containerClassName="w-full h-full"
                     className="w-full h-full object-cover"
+                    priority={true}
                   />
                 </div>
               )}

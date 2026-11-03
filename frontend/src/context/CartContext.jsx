@@ -622,7 +622,7 @@ export function CartProvider({ children }) {
             <Link
               to="/cart"
               onClick={() => setCartToast(null)}
-              className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-brand hover:bg-brand-hover text-white text-xs font-bold transition shadow-xs active:scale-95 focus:outline-none focus:ring-2 focus:ring-brand cursor-pointer"
+              className="shrink-0 hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-brand hover:bg-brand-hover text-white text-xs font-bold transition shadow-xs active:scale-95 focus:outline-none focus:ring-2 focus:ring-brand cursor-pointer"
             >
               <span>View Cart</span>
               <ArrowRight className="w-3.5 h-3.5" />

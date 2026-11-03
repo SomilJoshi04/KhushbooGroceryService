@@ -42,6 +42,7 @@ import { useAuth } from '../context/AuthContext.jsx';
 import { useStoreSettings } from '../context/StoreSettingsContext.jsx';
 import { apiClient, resolveImageUrl, getApiUploadUrl, NEUTRAL_PRODUCT_PLACEHOLDER } from '../config/api.js';
 import { LocationPickerModal } from '../components/map/LocationPickerModal.jsx';
+import { ImageWithSkeleton } from '../components/skeleton/index.js';
 
 export function CartPage({ onOpenAuth }) {
   const {
@@ -667,21 +668,12 @@ export function CartPage({ onOpenAuth }) {
                     >
                       {/* Product Info with Image */}
                       <div className="flex items-center gap-3.5 min-w-0 flex-1">
-                        <img
-                          src={resolveImageUrl(item.image) || NEUTRAL_PRODUCT_PLACEHOLDER}
+                        <ImageWithSkeleton
+                          src={item.image}
                           alt={item.name}
-                          className="w-16 h-16 sm:w-18 sm:h-18 rounded-lg object-cover shrink-0 bg-surface-subtle border border-border-neutral"
-                          onError={(e) => {
-                            if (!e.currentTarget.dataset.fallbackAttempted && item.image) {
-                              e.currentTarget.dataset.fallbackAttempted = 'true';
-                              const apiFallback = getApiUploadUrl(item.image);
-                              if (apiFallback && e.currentTarget.src !== apiFallback) {
-                                e.currentTarget.src = apiFallback;
-                                return;
-                              }
-                            }
-                            e.currentTarget.src = NEUTRAL_PRODUCT_PLACEHOLDER;
-                          }}
+                          aspectRatio="aspect-square"
+                          containerClassName="w-16 h-16 sm:w-18 sm:h-18 rounded-lg shrink-0 bg-surface-subtle border border-border-neutral"
+                          className="w-full h-full object-cover rounded-lg"
                         />
                         <div className="min-w-0 flex-1">
                           <span className="text-[10px] font-bold text-brand uppercase tracking-wider block">

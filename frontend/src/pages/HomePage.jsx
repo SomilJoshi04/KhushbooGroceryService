@@ -41,6 +41,83 @@ export function HomePage({ onOpenAuth }) {
   const [error, setError] = useState(null);
   const [selectedProduct, setSelectedProduct] = useState(null);
   const abortControllerRef = React.useRef(null);
+  const categoryCarouselRef = React.useRef(null);
+  const productSectionRef = React.useRef(null);
+  const scrollAnimationRef = React.useRef(null);
+
+  // Clean up any pending scroll animations on unmount
+  useEffect(() => {
+    return () => {
+      if (scrollAnimationRef.current) {
+        cancelAnimationFrame(scrollAnimationRef.current);
+      }
+    };
+  }, []);
+
+  /**
+   * Smart check to determine if the product section is already sufficiently visible in the viewport.
+   * - In Scenario A (user at top of page, products below fold): returns false -> trigger auto-scroll.
+   * - In Scenario B (user already scrolled down browsing products): returns true -> do not scroll.
+   */
+  const isProductSectionSufficientlyVisible = (el) => {
+    if (!el) return true;
+    const rect = el.getBoundingClientRect();
+    const vh = window.innerHeight || document.documentElement.clientHeight;
+
+    // If top of product section is below 40% of viewport height (or > 300px),
+    // product cards are hidden below the fold.
+    const isTooFarDown = rect.top > Math.min(300, vh * 0.4);
+    const isOffscreenBottom = rect.top >= vh;
+
+    return !isTooFarDown && !isOffscreenBottom;
+  };
+
+  /**
+   * Handles user tapping on a category from the category carousel.
+   * Implements conditional smart scrolling without layout shifts or unwanted jumps.
+   */
+  const handleCategorySelect = (slug) => {
+    // Scenario C: Do nothing if tapping the currently active category
+    if (slug === selectedCategory) {
+      return;
+    }
+
+    const isMobileViewport = typeof window !== 'undefined' && window.innerWidth < 1024;
+    const alreadyVisible = isProductSectionSufficientlyVisible(productSectionRef.current);
+
+    setSelectedCategory(slug);
+
+    // Scenario B & Desktop: Preserve current browsing position if already visible or on desktop
+    if (!isMobileViewport || alreadyVisible) {
+      return;
+    }
+
+    // Scenario A: Customer is at the top of the homepage and products are below the fold
+    if (scrollAnimationRef.current) {
+      cancelAnimationFrame(scrollAnimationRef.current);
+    }
+
+    scrollAnimationRef.current = requestAnimationFrame(() => {
+      const targetEl = categoryCarouselRef.current || productSectionRef.current;
+      if (!targetEl) return;
+
+      const headerEl = document.querySelector('header');
+      const headerHeight = headerEl ? headerEl.getBoundingClientRect().height : 64;
+
+      const targetTop = targetEl.getBoundingClientRect().top + window.pageYOffset;
+      const finalScrollY = Math.max(0, targetTop - headerHeight - 6);
+
+      const prefersReducedMotion =
+        typeof window !== 'undefined' &&
+        window.matchMedia &&
+        window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+      window.scrollTo({
+        top: finalScrollY,
+        behavior: prefersReducedMotion ? 'auto' : 'smooth',
+      });
+    });
+  };
 
   // Sync search input if URL search param changes
   useEffect(() => {
@@ -208,15 +285,20 @@ export function HomePage({ onOpenAuth }) {
         <PromotionalBannerCarousel />
 
         {/* Horizontal Category Carousel Section */}
-        <CategoryCarousel
-          categories={categories}
-          activeSlug={selectedCategory}
-          onSelectCategory={(slug) => setSelectedCategory(slug)}
-          loading={categoriesLoading}
-        />
+        <div ref={categoryCarouselRef} className="scroll-mt-20">
+          <CategoryCarousel
+            categories={categories}
+            activeSlug={selectedCategory}
+            onSelectCategory={handleCategorySelect}
+            loading={categoriesLoading}
+          />
+        </div>
 
         {/* Toolbar: Category Title / Active Search Filter, Sort, and In-Stock Toggle */}
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 sm:gap-4 bg-surface p-3.5 sm:p-4 rounded-2xl border border-border-neutral shadow-xs">
+        <div
+          ref={productSectionRef}
+          className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 sm:gap-4 bg-surface p-3.5 sm:p-4 rounded-2xl border border-border-neutral shadow-xs scroll-mt-20"
+        >
           {/* Left: Active Search Filter Chip OR Category Heading */}
           <div className="flex items-center justify-between sm:justify-start gap-2 min-w-0">
             {searchQuery ? (

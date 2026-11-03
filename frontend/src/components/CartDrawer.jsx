@@ -35,6 +35,7 @@ import { useAuth } from '../context/AuthContext.jsx';
 import { useStoreSettings } from '../context/StoreSettingsContext.jsx';
 import { resolveImageUrl, getApiUploadUrl, NEUTRAL_PRODUCT_PLACEHOLDER } from '../config/api.js';
 import { apiClient } from '../config/api.js';
+import { ImageWithSkeleton } from './skeleton/index.js';
 
 export function CartDrawer({ onOpenAuth }) {
   const {
@@ -521,21 +522,12 @@ export function CartDrawer({ onOpenAuth }) {
                       transition={{ duration: 0.2 }}
                       className="p-3 bg-surface border border-border-neutral rounded-xl flex gap-3 items-center hover:border-brand/40 transition shadow-xs"
                     >
-                      <img
-                        src={resolveImageUrl(item.image) || NEUTRAL_PRODUCT_PLACEHOLDER}
+                      <ImageWithSkeleton
+                        src={item.image}
                         alt={item.name}
-                        className="w-14 h-14 rounded-lg object-cover shrink-0 bg-surface-subtle border border-border-neutral"
-                        onError={(e) => {
-                          if (!e.currentTarget.dataset.fallbackAttempted) {
-                            e.currentTarget.dataset.fallbackAttempted = 'true';
-                            const apiFallback = getApiUploadUrl(item.image);
-                            if (apiFallback) {
-                              e.currentTarget.src = apiFallback;
-                              return;
-                            }
-                          }
-                          e.currentTarget.src = NEUTRAL_PRODUCT_PLACEHOLDER;
-                        }}
+                        aspectRatio="aspect-square"
+                        containerClassName="w-14 h-14 rounded-lg shrink-0 bg-surface-subtle border border-border-neutral"
+                        className="w-full h-full object-cover rounded-lg"
                       />
 
                       <div className="flex-1 min-w-0">

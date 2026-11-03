@@ -19,7 +19,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { apiClient, resolveImageUrl, getApiUploadUrl, NEUTRAL_PRODUCT_PLACEHOLDER } from '../config/api.js';
 import { useCart, getCartItemKey } from '../context/CartContext.jsx';
-import { SkeletonProductDetail } from '../components/skeleton/index.js';
+import { SkeletonProductDetail, ImageWithSkeleton } from '../components/skeleton/index.js';
 import {
   ArrowLeft,
   ShoppingBag,
@@ -196,29 +196,17 @@ export function ProductDetailPage() {
           {/* Left Column: Product Visuals */}
           <div className="md:col-span-5 space-y-4">
             <div className="relative aspect-square w-full bg-surface-subtle border border-border-neutral rounded-xl overflow-hidden flex items-center justify-center shadow-xs">
-              <img
-                ref={imageRef}
-                src={
-                  resolveImageUrl(product.images?.[0]) ||
-                  NEUTRAL_PRODUCT_PLACEHOLDER
-                }
+              <ImageWithSkeleton
+                imgRef={imageRef}
+                src={product.images?.[0]}
                 alt={product.name}
+                aspectRatio="aspect-square"
+                containerClassName="w-full h-full"
                 className="w-full h-full object-cover"
-                onError={(e) => {
-                  const rawImg = product.images?.[0];
-                  if (!e.currentTarget.dataset.fallbackAttempted && rawImg) {
-                    e.currentTarget.dataset.fallbackAttempted = 'true';
-                    const apiFallback = getApiUploadUrl(rawImg);
-                    if (apiFallback && e.currentTarget.src !== apiFallback) {
-                      e.currentTarget.src = apiFallback;
-                      return;
-                    }
-                  }
-                  e.currentTarget.src = NEUTRAL_PRODUCT_PLACEHOLDER;
-                }}
+                priority={true}
               />
               {hasDiscount && (
-                <span className="absolute top-3 left-3 px-2 py-0.5 rounded bg-brand text-white font-bold text-xs shadow-xs">
+                <span className="absolute top-3 left-3 px-2 py-0.5 rounded bg-brand text-white font-bold text-xs shadow-xs z-10 pointer-events-none">
                   {discountPercent}% OFF
                 </span>
               )}
