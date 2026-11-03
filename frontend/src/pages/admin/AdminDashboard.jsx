@@ -13,6 +13,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { apiClient } from '../../config/api.js';
+import { SkeletonDashboard } from '../../components/skeleton/index.js';
 import {
   TrendingUp,
   Package,
@@ -50,12 +51,7 @@ export function AdminDashboard() {
   }, []);
 
   if (loading) {
-    return (
-      <div className="py-20 flex flex-col items-center justify-center text-center">
-        <RefreshCw className="w-8 h-8 text-brand animate-spin mb-3" />
-        <p className="text-xs text-text-muted">Loading store performance metrics from MongoDB...</p>
-      </div>
-    );
+    return <SkeletonDashboard />;
   }
 
   if (error) {

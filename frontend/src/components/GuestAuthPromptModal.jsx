@@ -1,8 +1,4 @@
 /**
- * Polite Guest Authentication Prompt Modal.
- *
- * Appears when an unauthenticated customer attempts to add an item to the cart or checkout.
- * Non-intrusive, polite, and preserves the customer's intended shopping action.
  *
  * @module components/GuestAuthPromptModal
  */

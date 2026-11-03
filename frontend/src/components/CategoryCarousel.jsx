@@ -13,6 +13,7 @@
 import React, { useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, ArrowRight } from 'lucide-react';
+import { SkeletonCategoryCarousel } from './skeleton/index.js';
 
 export function CategoryCarousel({
   categories = [],
@@ -38,22 +39,7 @@ export function CategoryCarousel({
   };
 
   if (loading) {
-    return (
-      <div className="py-4 border-b border-border-neutral">
-        <div className="flex items-center justify-between mb-3">
-          <div className="h-5 w-36 bg-surface-subtle border border-border-neutral rounded animate-pulse" />
-          <div className="h-5 w-16 bg-surface-subtle border border-border-neutral rounded animate-pulse" />
-        </div>
-        <div className="flex gap-4 overflow-hidden">
-          {[...Array(7)].map((_, idx) => (
-            <div key={idx} className="shrink-0 flex flex-col items-center gap-2">
-              <div className="w-16 h-16 rounded-xl bg-surface-subtle border border-border-neutral animate-pulse" />
-              <div className="w-14 h-3 bg-surface-subtle border border-border-neutral rounded animate-pulse" />
-            </div>
-          ))}
-        </div>
-      </div>
-    );
+    return <SkeletonCategoryCarousel count={8} />;
   }
 
   if (!categories || categories.length === 0) {

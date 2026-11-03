@@ -19,6 +19,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { apiClient } from '../config/api.js';
 import { useCart, getCartItemKey } from '../context/CartContext.jsx';
+import { SkeletonProductDetail } from '../components/skeleton/index.js';
 import {
   ArrowLeft,
   ShoppingBag,
@@ -75,9 +76,8 @@ export function ProductDetailPage() {
 
   if (loading) {
     return (
-      <div className="max-w-5xl mx-auto px-4 py-16 flex flex-col items-center justify-center text-text-muted bg-primary-bg min-h-[60vh]">
-        <RefreshCw className="w-8 h-8 animate-spin text-brand mb-3" />
-        <p className="text-xs">Loading grocery product details...</p>
+      <div className="max-w-5xl mx-auto px-4 py-8">
+        <SkeletonProductDetail isModal={false} />
       </div>
     );
   }

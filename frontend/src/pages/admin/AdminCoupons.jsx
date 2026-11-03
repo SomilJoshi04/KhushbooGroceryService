@@ -30,6 +30,7 @@ import { Pagination } from '../../components/Pagination.jsx';
 import { useBulkSelection } from '../../hooks/useBulkSelection.js';
 import { BulkActionBar } from '../../components/BulkActionBar.jsx';
 import { BulkConfirmModal } from '../../components/BulkConfirmModal.jsx';
+import { SkeletonTableRow } from '../../components/skeleton/index.js';
 
 export function AdminCoupons() {
   const [coupons, setCoupons] = useState([]);
@@ -354,12 +355,9 @@ export function AdminCoupons() {
             </thead>
             <tbody className="divide-y divide-border-neutral font-medium">
               {loading && coupons.length === 0 ? (
-                <tr>
-                  <td colSpan={9} className="py-12 text-center text-text-muted">
-                    <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2 text-brand" />
-                    Loading coupons from database...
-                  </td>
-                </tr>
+                Array.from({ length: 5 }).map((_, i) => (
+                  <SkeletonTableRow key={i} columns={8} />
+                ))
               ) : coupons.length === 0 ? (
                 <tr>
                   <td colSpan={9} className="py-12 text-center text-text-muted">

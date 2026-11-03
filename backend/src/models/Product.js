@@ -161,5 +161,8 @@ productSchema.index({
 productSchema.index({ createdAt: -1, _id: -1 });
 productSchema.index({ category: 1, createdAt: -1 });
 productSchema.index({ isPublished: 1, createdAt: -1 });
+productSchema.index({ isPublished: 1, category: 1, createdAt: -1 });
+productSchema.index({ isPublished: 1, 'variants.stock': 1, createdAt: -1 });
+productSchema.index({ isPublished: 1, brand: 1, createdAt: -1 });
 
 export const Product = mongoose.model('Product', productSchema);

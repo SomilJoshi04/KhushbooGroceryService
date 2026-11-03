@@ -32,6 +32,7 @@ import cookieParser from 'cookie-parser';
 import { connectDB, disconnectDB, isDBConnected } from './config/db.js';
 import { initSocket, closeSocket } from './socket.js';
 import { requestId } from './middleware/requestId.js';
+import { compressionMiddleware } from './middleware/compression.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import foodRoutes from './routes/foodRoutes.js';
 import authRoutes from './routes/authRoutes.js';
@@ -67,6 +68,7 @@ app.set('trust proxy', 1);
 // 2a. Request ID — attach before any other middleware so errors include it.
 // ─────────────────────────────────────────────────────────────────────────────
 app.use(requestId);
+app.use(compressionMiddleware);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 2b. Helmet — sets secure HTTP headers.
@@ -241,13 +243,17 @@ app.use(['/uploads/documents', '/uploads/temporary'], (req, res) => {
   });
 });
 
-// Serve public uploads securely with CORP and nosniff headers
+// Serve public uploads securely with long-term immutable browser caching, CORP, and nosniff headers
 app.use(
   '/uploads',
   express.static(uploadsDir, {
-    setHeaders: (res) => {
+    etag: true,
+    lastModified: true,
+    maxAge: '30d',
+    setHeaders: (res, filePath) => {
       res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
-      res.setHeader('Cache-Control', 'public, max-age=86400');
+      // Immutable caching for UUID-addressed files
+      res.setHeader('Cache-Control', 'public, max-age=2592000, immutable');
       res.setHeader('X-Content-Type-Options', 'nosniff');
     },
   })

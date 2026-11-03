@@ -42,3 +42,32 @@
   border: 1px solid #E5E8E3;
   box-shadow: 0 1px 3px 0 rgba(36, 92, 67, 0.04);
 }
+
+/* ── Centralized Shimmer Skeleton Loading Animation ───────────────────────── */
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.animate-shimmer {
+  background: linear-gradient(
+    90deg,
+    rgba(229, 232, 227, 0.6) 0%,
+    rgba(240, 244, 238, 0.95) 50%,
+    rgba(229, 232, 227, 0.6) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.8s infinite ease-in-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-shimmer {
+    animation: none;
+    background: #E5E8E3;
+  }
+}
+

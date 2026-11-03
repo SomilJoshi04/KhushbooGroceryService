@@ -15,6 +15,8 @@ import { CategoryCarousel } from '../components/CategoryCarousel.jsx';
 import { PromotionalBannerCarousel } from '../components/PromotionalBannerCarousel.jsx';
 import { ProductCard } from '../components/ProductCard.jsx';
 import { ProductDetailModal } from '../components/ProductDetailModal.jsx';
+import { SkeletonProductGrid } from '../components/skeleton/index.js';
+import { swrCache } from '../utils/swrCache.js';
 import { Search, ShoppingBag, ArrowUpDown, X } from 'lucide-react';
 import { useStoreSettings } from '../context/StoreSettingsContext.jsx';
 
@@ -23,16 +25,22 @@ export function HomePage({ onOpenAuth }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const initialSearch = searchParams.get('search') || '';
 
-  const [categories, setCategories] = useState([]);
-  const [products, setProducts] = useState([]);
+  const defaultCacheKey = 'products:All:newest:false:';
+  const initialProductsCached = swrCache.get(defaultCacheKey);
+  const initialCategoriesCached = swrCache.get('categories');
+
+  const [categories, setCategories] = useState(() => initialCategoriesCached?.data || []);
+  const [products, setProducts] = useState(() => initialProductsCached?.data || []);
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [searchQuery, setSearchQuery] = useState(initialSearch);
   const [sortOption, setSortOption] = useState('newest');
   const [onlyInStock, setOnlyInStock] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [categoriesLoading, setCategoriesLoading] = useState(true);
+  const [loading, setLoading] = useState(() => !initialProductsCached?.data);
+  const [isRevalidating, setIsRevalidating] = useState(false);
+  const [categoriesLoading, setCategoriesLoading] = useState(() => !initialCategoriesCached?.data);
   const [error, setError] = useState(null);
   const [selectedProduct, setSelectedProduct] = useState(null);
+  const abortControllerRef = React.useRef(null);
 
   // Sync search input if URL search param changes
   useEffect(() => {
@@ -57,57 +65,93 @@ export function HomePage({ onOpenAuth }) {
     setSearchParams(newParams, { replace: true });
   };
 
-  // Load Categories from backend
+  // Load Categories with SWR cache
   useEffect(() => {
-    async function loadCategories() {
-      setCategoriesLoading(true);
-      try {
+    swrCache.fetchWithSWR(
+      'categories',
+      async () => {
         const res = await apiClient.get('/v1/categories');
-        if (res.data?.success && Array.isArray(res.data.data)) {
-          setCategories(res.data.data);
-        }
-      } catch (err) {
-        console.error('[home] Error loading categories:', err.message);
-      } finally {
-        setCategoriesLoading(false);
+        return Array.isArray(res.data?.data) ? res.data.data : [];
+      },
+      {
+        ttlMs: 5 * 60 * 1000,
+        onSuccess: (data) => {
+          setCategories(data);
+          setCategoriesLoading(false);
+        },
+        onError: (err) => {
+          console.error('[home] Error loading categories:', err.message);
+          setCategoriesLoading(false);
+        },
       }
-    }
-    loadCategories();
+    );
   }, []);
 
-  // Fetch Products matching filters
-  const fetchProducts = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const params = {
-        sort: sortOption,
-      };
-      if (selectedCategory && selectedCategory !== 'All') {
-        params.category = selectedCategory;
-      }
-      if (searchQuery.trim()) {
-        params.search = searchQuery.trim();
-      }
-      if (onlyInStock) {
-        params.inStock = 'true';
-      }
-
-      const res = await apiClient.get('/v1/products', { params });
-      if (res.data?.success && Array.isArray(res.data.data)) {
-        setProducts(res.data.data);
-      } else {
-        setProducts([]);
-      }
-    } catch (err) {
-      setError(err.message || 'Failed to load grocery items.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
+  // Fetch Products matching filters with debouncing, AbortController, and SWR caching
   useEffect(() => {
-    fetchProducts();
+    const trimmedSearch = searchQuery.trim();
+    const cacheKey = `products:${selectedCategory}:${sortOption}:${onlyInStock}:${trimmedSearch}`;
+    const cached = swrCache.get(cacheKey);
+
+    // If cached data is present, display immediately (0ms)
+    if (cached && cached.data) {
+      setProducts(cached.data);
+      setLoading(false);
+      setError(null);
+      if (!cached.isStale) {
+        return;
+      }
+      setIsRevalidating(true);
+    } else {
+      setLoading(true);
+      setError(null);
+    }
+
+    const timer = setTimeout(async () => {
+      // Abort previous in-flight request if user is filtering or typing rapidly
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+
+      try {
+        const params = { sort: sortOption };
+        if (selectedCategory && selectedCategory !== 'All') {
+          params.category = selectedCategory;
+        }
+        if (trimmedSearch) {
+          params.search = trimmedSearch;
+        }
+        if (onlyInStock) {
+          params.inStock = 'true';
+        }
+
+        const res = await apiClient.get('/v1/products', {
+          params,
+          signal: controller.signal,
+        });
+
+        if (res.data?.success && Array.isArray(res.data.data)) {
+          setProducts(res.data.data);
+          swrCache.set(cacheKey, res.data.data, 3 * 60 * 1000);
+        } else {
+          setProducts([]);
+        }
+      } catch (err) {
+        if (err.name === 'CanceledError' || err.code === 'ERR_CANCELED') {
+          return;
+        }
+        setError(err.message || 'Failed to load grocery items.');
+      } finally {
+        setLoading(false);
+        setIsRevalidating(false);
+      }
+    }, trimmedSearch ? 250 : 0);
+
+    return () => {
+      clearTimeout(timer);
+    };
   }, [selectedCategory, sortOption, onlyInStock, searchQuery]);
 
   return (
@@ -274,26 +318,18 @@ export function HomePage({ onOpenAuth }) {
         </div>
 
         {/* Products Grid */}
-        {loading ? (
-          <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-4">
-            {[...Array(10)].map((_, idx) => (
-              <div
-                key={idx}
-                className="bg-surface border border-border-neutral rounded-xl p-3 space-y-3 animate-pulse shadow-xs"
-              >
-                <div className="aspect-square bg-surface-subtle rounded-lg" />
-                <div className="h-3.5 bg-surface-subtle rounded w-3/4" />
-                <div className="h-3 bg-surface-subtle rounded w-1/2" />
-                <div className="h-7 bg-surface-subtle rounded-lg" />
-              </div>
-            ))}
-          </div>
-        ) : error ? (
+        {loading && products.length === 0 ? (
+          <SkeletonProductGrid count={10} />
+        ) : error && products.length === 0 ? (
           <div className="p-8 rounded-2xl bg-status-error/10 border border-status-error/20 text-center text-status-error space-y-3">
             <p className="font-semibold text-sm">{error}</p>
             <button
-              onClick={fetchProducts}
-              className="px-4 py-2 bg-brand hover:bg-brand-hover text-white rounded-xl text-xs font-bold transition"
+              onClick={() => {
+                swrCache.invalidate('products');
+                setLoading(true);
+                setError(null);
+              }}
+              className="px-4 py-2 bg-brand hover:bg-brand-hover text-white rounded-xl text-xs font-bold transition cursor-pointer"
             >
               Retry
             </button>
@@ -319,10 +355,11 @@ export function HomePage({ onOpenAuth }) {
           </div>
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-4">
-            {products.map((product) => (
+            {products.map((product, idx) => (
               <ProductCard
                 key={product._id}
                 product={product}
+                priority={idx < 4}
                 onOpenDetails={(p) => setSelectedProduct(p)}
               />
             ))}

@@ -20,39 +20,43 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, ArrowRight, Sparkles } from 'lucide-react';
 import { apiClient } from '../config/api.js';
+import { SkeletonBanner } from './skeleton/index.js';
+import { swrCache } from '../utils/swrCache.js';
 
 const FALLBACK_BANNER_IMAGE =
   'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=1200&q=80';
 
 export function PromotionalBannerCarousel({ className = '' }) {
-  const [banners, setBanners] = useState([]);
+  const cachedBanners = swrCache.get('banners');
+  const [banners, setBanners] = useState(() => cachedBanners?.data || []);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => !cachedBanners?.data);
 
   const touchStartXRef = useRef(0);
   const touchEndXRef = useRef(0);
   const navigate = useNavigate();
 
-  // Load eligible published banners from public API
+  // Load eligible published banners from public API with SWR cache
   useEffect(() => {
-    let isMounted = true;
-    async function fetchBanners() {
-      try {
+    swrCache.fetchWithSWR(
+      'banners',
+      async () => {
         const res = await apiClient.get('/v1/banners');
-        if (isMounted && res.data?.success && Array.isArray(res.data.data)) {
-          setBanners(res.data.data);
-        }
-      } catch (err) {
-        console.warn('[banners] Could not fetch promotional banners:', err.message);
-      } finally {
-        if (isMounted) setLoading(false);
+        return Array.isArray(res.data?.data) ? res.data.data : [];
+      },
+      {
+        ttlMs: 5 * 60 * 1000,
+        onSuccess: (data) => {
+          setBanners(data);
+          setLoading(false);
+        },
+        onError: (err) => {
+          console.warn('[banners] Could not fetch promotional banners:', err.message);
+          setLoading(false);
+        },
       }
-    }
-    fetchBanners();
-    return () => {
-      isMounted = false;
-    };
+    );
   }, []);
 
   const totalBanners = banners.length;
@@ -104,13 +108,9 @@ export function PromotionalBannerCarousel({ className = '' }) {
     }
   };
 
-  // Loading skeleton matches EXACT fixed dimensions of the loaded banner
+  // Content-shaped loading skeleton matches EXACT fixed dimensions of the loaded banner
   if (loading) {
-    return (
-      <div className={`w-full ${className}`}>
-        <div className="h-[210px] sm:h-[250px] md:h-[320px] lg:h-[385px] w-full rounded-2xl sm:rounded-3xl bg-surface border border-border-neutral animate-pulse" />
-      </div>
-    );
+    return <SkeletonBanner className={className} />;
   }
 
   // Graceful empty state: render nothing if no eligible banners exist

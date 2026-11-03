@@ -27,6 +27,8 @@ import { Pagination } from '../../components/Pagination.jsx';
 import { useBulkSelection } from '../../hooks/useBulkSelection.js';
 import { BulkActionBar } from '../../components/BulkActionBar.jsx';
 import { BulkConfirmModal } from '../../components/BulkConfirmModal.jsx';
+import { SkeletonTable } from '../../components/skeleton/index.js';
+import { swrCache } from '../../utils/swrCache.js';
 
 export function AdminProducts() {
   const [products, setProducts] = useState([]);
@@ -430,6 +432,8 @@ export function AdminProducts() {
         await apiClient.post('/v1/products', payload);
       }
 
+      swrCache.invalidate('products');
+
       setModalOpen(false);
       setEditingProduct(null);
       await fetchProducts();
@@ -503,10 +507,7 @@ export function AdminProducts() {
 
       {/* Products Table */}
       {loading ? (
-        <div className="p-16 text-center bg-surface border border-border-neutral rounded-2xl">
-          <RefreshCw className="w-8 h-8 text-brand animate-spin mx-auto mb-2" />
-          <p className="text-xs text-text-muted font-medium">Loading catalog from MongoDB...</p>
-        </div>
+        <SkeletonTable rows={8} columns={6} showToolbar={false} showPagination={true} />
       ) : error ? (
         <div className="p-6 bg-red-50 border border-red-200 text-status-error rounded-2xl text-center">
           {error}

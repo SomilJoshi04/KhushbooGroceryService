@@ -120,7 +120,7 @@ export async function createPaymentIntent(req, res, next) {
     }
 
     let razorpayOrderId = paymentRecord?.razorpayOrderId;
-    let keyId = process.env.RAZORPAY_KEY_ID || 'rzp_test_khushboofood';
+    let keyId = process.env.RAZORPAY_KEY_ID || '';
 
     if (!razorpayOrderId) {
       const razorpayOrder = await createPaymentOrder({

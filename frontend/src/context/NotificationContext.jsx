@@ -19,6 +19,7 @@ import {
   testNotificationSound,
   initializeAudioUnlock,
 } from '../utils/soundManager.js';
+import { swrCache } from '../utils/swrCache.js';
 
 const NotificationContext = createContext(null);
 
@@ -56,24 +57,28 @@ export function NotificationProvider({ children }) {
     initializeAudioUnlock();
   }, []);
 
-  // Fetch initial global settings
+  // Fetch initial global settings using shared SWR cache (deduplicated with StoreSettingsContext)
   useEffect(() => {
     let isMounted = true;
-    apiClient
-      .get('/store/settings')
-      .then((res) => {
-        if (!isMounted) return;
-        const d = res.data?.data;
-        if (d?.notificationSettings) {
+    swrCache.fetchWithSWR(
+      'store_settings',
+      async () => {
+        const res = await apiClient.get('/v1/store/settings');
+        return res.data?.data || null;
+      },
+      {
+        ttlMs: 5 * 60 * 1000,
+        onSuccess: (d) => {
+          if (!isMounted || !d?.notificationSettings) return;
           if (typeof d.notificationSettings.soundEnabled === 'boolean') {
             setGlobalSoundEnabled(d.notificationSettings.soundEnabled);
           }
           if (typeof d.notificationSettings.soundCooldownSeconds === 'number') {
             setSoundCooldownSeconds(d.notificationSettings.soundCooldownSeconds);
           }
-        }
-      })
-      .catch(() => {});
+        },
+      }
+    ).catch(() => {});
     return () => {
       isMounted = false;
     };

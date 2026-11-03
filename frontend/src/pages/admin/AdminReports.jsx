@@ -24,6 +24,7 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { Pagination } from '../../components/Pagination.jsx';
+import { SkeletonDashboard } from '../../components/skeleton/index.js';
 
 export function AdminReports() {
   const [data, setData] = useState(null);
@@ -57,12 +58,7 @@ export function AdminReports() {
   }, [productsPage, productsPageSize]);
 
   if (loading && !data) {
-    return (
-      <div className="py-20 flex flex-col items-center justify-center text-text-muted">
-        <RefreshCw className="w-8 h-8 animate-spin text-brand mb-3" />
-        <p className="text-xs font-medium">Computing database reports & aggregations...</p>
-      </div>
-    );
+    return <SkeletonDashboard />;
   }
 
   const { ordersByPayment = [], recentDaysSales = [], topSellingProducts = [] } = data || {};

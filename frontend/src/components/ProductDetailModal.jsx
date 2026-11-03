@@ -31,6 +31,7 @@ import {
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useCart, getCartItemKey } from '../context/CartContext.jsx';
+import { ImageWithSkeleton } from './skeleton/index.js';
 
 export function ProductDetailModal({ product, isOpen, onClose }) {
   const {
@@ -173,18 +174,15 @@ export function ProductDetailModal({ product, isOpen, onClose }) {
           {/* Product Image Column */}
           <div className="w-full md:w-5/12 flex flex-col items-center shrink-0">
             <div className="relative w-full max-h-52 sm:max-h-64 md:max-h-none aspect-square bg-surface-subtle border border-border-neutral rounded-xl overflow-hidden flex items-center justify-center">
-              <img
-                ref={imageRef}
+              <ImageWithSkeleton
+                imgRef={imageRef}
                 src={
                   product.images?.[0] ||
                   'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=600&q=80'
                 }
                 alt={product.name}
                 className="w-full h-full object-cover"
-                onError={(e) => {
-                  e.currentTarget.src =
-                    'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=600&q=80';
-                }}
+                loading="eager"
               />
               {hasDiscount && (
                 <span className="absolute top-2.5 left-2.5 px-2 py-0.5 rounded bg-brand text-white font-bold text-[10px] shadow-xs">

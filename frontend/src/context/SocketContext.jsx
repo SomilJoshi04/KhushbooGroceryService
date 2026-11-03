@@ -27,7 +27,11 @@ function getSocketUrl() {
   }
   // Strip trailing /api or /api/v1 from API_BASE_URL
   const clean = API_BASE_URL.replace(/\/api(\/v\d+)?\/?$/, '');
-  return clean || 'http://localhost:5000';
+  if (clean) return clean;
+  if (import.meta.env.PROD && typeof window !== 'undefined') {
+    return window.location.origin;
+  }
+  return 'http://localhost:5000';
 }
 
 export function SocketProvider({ children }) {

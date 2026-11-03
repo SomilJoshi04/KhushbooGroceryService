@@ -23,8 +23,11 @@ import { createNotification } from '../services/notificationService.js';
 export async function getCategories(req, res, next) {
   try {
     const categories = await Category.find({ isActive: true })
+      .select('name slug description image order isActive')
       .sort({ order: 1, name: 1 })
       .lean();
+
+    res.set('Cache-Control', 'public, max-age=60, s-maxage=120, stale-while-revalidate=300');
 
     res.json({
       success: true,
@@ -125,6 +128,7 @@ export async function getProducts(req, res, next) {
 
     const [products, total] = await Promise.all([
       Product.find(filter)
+        .select('name slug brand images isVeg category tags variants.sku variants.label variants.unit variants.quantity variants.pricePaise variants.mrpPaise variants.stock createdAt')
         .populate('category', 'name slug image')
         .sort(sortOptions)
         .skip(skip)
@@ -132,6 +136,8 @@ export async function getProducts(req, res, next) {
         .lean(),
       Product.countDocuments(filter),
     ]);
+
+    res.set('Cache-Control', 'public, max-age=30, s-maxage=60, stale-while-revalidate=180');
 
     res.json({
       success: true,
@@ -169,6 +175,8 @@ export async function getProductBySlugOrId(req, res, next) {
         message: 'Product not found.',
       });
     }
+
+    res.set('Cache-Control', 'public, max-age=60, s-maxage=120, stale-while-revalidate=300');
 
     res.json({
       success: true,
@@ -360,6 +368,8 @@ export async function getCategoryBySlugOrId(req, res, next) {
         message: 'Category not found.',
       });
     }
+
+    res.set('Cache-Control', 'public, max-age=60, s-maxage=120, stale-while-revalidate=300');
 
     res.json({
       success: true,

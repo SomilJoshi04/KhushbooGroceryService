@@ -15,6 +15,7 @@ import { Pagination } from '../../components/Pagination.jsx';
 import { useBulkSelection } from '../../hooks/useBulkSelection.js';
 import { BulkActionBar } from '../../components/BulkActionBar.jsx';
 import { BulkConfirmModal } from '../../components/BulkConfirmModal.jsx';
+import { SkeletonTable } from '../../components/skeleton/index.js';
 import {
   Package,
   Search,
@@ -302,10 +303,7 @@ export function AdminOrders() {
 
       {/* Orders Table */}
       {loading ? (
-        <div className="p-16 text-center bg-surface border border-border-neutral rounded-2xl">
-          <RefreshCw className="w-8 h-8 text-brand animate-spin mx-auto mb-2" />
-          <p className="text-xs text-text-muted font-medium">Loading orders from database...</p>
-        </div>
+        <SkeletonTable rows={6} columns={6} showToolbar={false} showPagination={true} />
       ) : error ? (
         <div className="p-8 bg-red-50 border border-red-200 text-status-error rounded-2xl text-center space-y-3">
           <p className="text-sm font-semibold">{error}</p>

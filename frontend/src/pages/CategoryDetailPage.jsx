@@ -14,6 +14,7 @@ import { useParams, Link } from 'react-router-dom';
 import { apiClient } from '../config/api.js';
 import { ProductCard } from '../components/ProductCard.jsx';
 import { ProductDetailModal } from '../components/ProductDetailModal.jsx';
+import { SkeletonProductGrid, SkeletonTitle, SkeletonText, SkeletonBase } from '../components/skeleton/index.js';
 import { Search, ArrowLeft, ArrowUpDown, ShoppingBag, Grid, RefreshCw } from 'lucide-react';
 
 export function CategoryDetailPage() {
@@ -131,34 +132,45 @@ export function CategoryDetailPage() {
             <Link to="/categories" className="hover:text-brand transition">Categories</Link>
             <span>/</span>
             <span className="text-text-main font-semibold">
-              {categoryLoading ? 'Loading...' : category?.name || slug}
+              {categoryLoading ? '...' : category?.name || slug}
             </span>
           </nav>
 
-          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
-            <div className="space-y-2 max-w-2xl">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-brand bg-brand-light px-2.5 py-1 rounded-full border border-brand/20 inline-block">
-                Grocery Department
-              </span>
-              <h1 className="text-2xl sm:text-4xl font-extrabold font-heading text-text-main">
-                {category?.name || slug}
-              </h1>
-              <p className="text-xs sm:text-sm text-text-muted leading-relaxed">
-                {category?.description || '100% stone-ground, pure, and fresh grocery products delivered directly in Indore.'}
-              </p>
-            </div>
-
-            {/* Category Image Preview Badge */}
-            {category?.image && (
-              <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-2xl overflow-hidden border border-border-neutral shrink-0 shadow-sm bg-surface">
-                <img
-                  src={category.image}
-                  alt={category.name}
-                  className="w-full h-full object-cover"
-                />
+          {categoryLoading ? (
+            <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6" aria-busy="true">
+              <div className="space-y-3 max-w-2xl w-full">
+                <SkeletonBase className="h-5 w-28 rounded-full" />
+                <SkeletonTitle height="h-8 sm:h-10" width="60%" />
+                <SkeletonText width="85%" height="h-4" />
               </div>
-            )}
-          </div>
+              <SkeletonBase className="w-24 h-24 sm:w-28 sm:h-28 rounded-2xl shrink-0" />
+            </div>
+          ) : (
+            <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
+              <div className="space-y-2 max-w-2xl">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-brand bg-brand-light px-2.5 py-1 rounded-full border border-brand/20 inline-block">
+                  Grocery Department
+                </span>
+                <h1 className="text-2xl sm:text-4xl font-extrabold font-heading text-text-main">
+                  {category?.name || slug}
+                </h1>
+                <p className="text-xs sm:text-sm text-text-muted leading-relaxed">
+                  {category?.description || '100% stone-ground, pure, and fresh grocery products delivered directly in Indore.'}
+                </p>
+              </div>
+
+              {/* Category Image Preview Badge */}
+              {category?.image && (
+                <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-2xl overflow-hidden border border-border-neutral shrink-0 shadow-sm bg-surface">
+                  <img
+                    src={category.image}
+                    alt={category.name}
+                    className="w-full h-full object-cover"
+                  />
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </section>
 
@@ -216,19 +228,7 @@ export function CategoryDetailPage() {
 
         {/* Products Grid */}
         {loading ? (
-          <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-4">
-            {[...Array(6)].map((_, idx) => (
-              <div
-                key={idx}
-                className="bg-surface border border-border-neutral rounded-xl p-3 space-y-3 animate-pulse shadow-xs"
-              >
-                <div className="aspect-square bg-surface-subtle rounded-lg" />
-                <div className="h-3.5 bg-surface-subtle rounded w-3/4" />
-                <div className="h-3 bg-surface-subtle rounded w-1/2" />
-                <div className="h-7 bg-surface-subtle rounded-lg" />
-              </div>
-            ))}
-          </div>
+          <SkeletonProductGrid count={10} />
         ) : error ? (
           <div className="p-8 rounded-2xl bg-status-error/10 border border-status-error/20 text-center text-status-error space-y-3">
             <p className="font-semibold text-sm">{error}</p>
@@ -261,10 +261,11 @@ export function CategoryDetailPage() {
           </div>
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-4">
-            {products.map((product) => (
+            {products.map((product, idx) => (
               <ProductCard
                 key={product._id}
                 product={product}
+                priority={idx < 4}
                 onOpenDetails={(p) => setSelectedProduct(p)}
               />
             ))}

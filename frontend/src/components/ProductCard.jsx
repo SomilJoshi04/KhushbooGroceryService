@@ -17,8 +17,9 @@
 import React, { useState, useRef } from 'react';
 import { Plus, Minus } from 'lucide-react';
 import { useCart, getCartItemKey } from '../context/CartContext.jsx';
+import { ImageWithSkeleton } from './skeleton/index.js';
 
-export function ProductCard({ product, onOpenDetails }) {
+export function ProductCard({ product, onOpenDetails, priority = false }) {
   const {
     getItemQty,
     addToCart,
@@ -101,21 +102,18 @@ export function ProductCard({ product, onOpenDetails }) {
       onClick={handleCardClick}
       className="group relative bg-surface border border-border-neutral hover:border-brand/40 rounded-xl overflow-hidden transition-all duration-200 flex flex-col justify-between hover:shadow-xs cursor-pointer select-none"
     >
-      {/* Product Image Container */}
+      {/* Product Image Container with Progressive Skeleton */}
       <div className="relative aspect-square w-full bg-surface-subtle overflow-hidden shrink-0 border-b border-border-neutral">
-        <img
-          ref={imageRef}
+        <ImageWithSkeleton
+          imgRef={imageRef}
           src={
             product.images?.[0] ||
             'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=400&q=80'
           }
           alt={product.name}
           className="w-full h-full object-cover group-hover:scale-102 transition duration-300"
-          loading="lazy"
-          onError={(e) => {
-            e.currentTarget.src =
-              'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=400&q=80';
-          }}
+          priority={priority}
+          sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 20vw"
         />
 
         {/* Genuine Discount Badge (if applicable) */}

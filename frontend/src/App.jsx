@@ -31,26 +31,65 @@ import { CategoryDetailPage } from './pages/CategoryDetailPage.jsx';
 import { AccountPage } from './pages/AccountPage.jsx';
 import { CartPage } from './pages/CartPage.jsx';
 import { ProductDetailPage } from './pages/ProductDetailPage.jsx';
-import { PrivacyPolicyPage } from './pages/PrivacyPolicyPage.jsx';
-import { TermsPage } from './pages/TermsPage.jsx';
-import { FaqPage } from './pages/FaqPage.jsx';
-import { HelpSupportPage } from './pages/HelpSupportPage.jsx';
+import { SkeletonDashboard } from './components/skeleton/index.js';
 
-// Admin Pages
-import { AdminLayout } from './pages/admin/AdminLayout.jsx';
-import { AdminDashboard } from './pages/admin/AdminDashboard.jsx';
-import { AdminOrders } from './pages/admin/AdminOrders.jsx';
-import { AdminProducts } from './pages/admin/AdminProducts.jsx';
-import { AdminCategories } from './pages/admin/AdminCategories.jsx';
-import { AdminInventory } from './pages/admin/AdminInventory.jsx';
-import { AdminCustomers } from './pages/admin/AdminCustomers.jsx';
-import { AdminZones } from './pages/admin/AdminZones.jsx';
-import { AdminContent } from './pages/admin/AdminContent.jsx';
-import { AdminCoupons } from './pages/admin/AdminCoupons.jsx';
-import { AdminReports } from './pages/admin/AdminReports.jsx';
-import { AdminSettings } from './pages/admin/AdminSettings.jsx';
-import { AdminBanners } from './pages/admin/AdminBanners.jsx';
-import { AdminProfile } from './pages/admin/AdminProfile.jsx';
+// Lazy-loaded Legal & Secondary Content
+const PrivacyPolicyPage = React.lazy(() =>
+  import('./pages/PrivacyPolicyPage.jsx').then((m) => ({ default: m.PrivacyPolicyPage }))
+);
+const TermsPage = React.lazy(() =>
+  import('./pages/TermsPage.jsx').then((m) => ({ default: m.TermsPage }))
+);
+const FaqPage = React.lazy(() =>
+  import('./pages/FaqPage.jsx').then((m) => ({ default: m.FaqPage }))
+);
+const HelpSupportPage = React.lazy(() =>
+  import('./pages/HelpSupportPage.jsx').then((m) => ({ default: m.HelpSupportPage }))
+);
+
+// Lazy-loaded Administrative Suite (Isolated from storefront customer bundles)
+const AdminLayout = React.lazy(() =>
+  import('./pages/admin/AdminLayout.jsx').then((m) => ({ default: m.AdminLayout }))
+);
+const AdminDashboard = React.lazy(() =>
+  import('./pages/admin/AdminDashboard.jsx').then((m) => ({ default: m.AdminDashboard }))
+);
+const AdminOrders = React.lazy(() =>
+  import('./pages/admin/AdminOrders.jsx').then((m) => ({ default: m.AdminOrders }))
+);
+const AdminProducts = React.lazy(() =>
+  import('./pages/admin/AdminProducts.jsx').then((m) => ({ default: m.AdminProducts }))
+);
+const AdminCategories = React.lazy(() =>
+  import('./pages/admin/AdminCategories.jsx').then((m) => ({ default: m.AdminCategories }))
+);
+const AdminInventory = React.lazy(() =>
+  import('./pages/admin/AdminInventory.jsx').then((m) => ({ default: m.AdminInventory }))
+);
+const AdminCustomers = React.lazy(() =>
+  import('./pages/admin/AdminCustomers.jsx').then((m) => ({ default: m.AdminCustomers }))
+);
+const AdminZones = React.lazy(() =>
+  import('./pages/admin/AdminZones.jsx').then((m) => ({ default: m.AdminZones }))
+);
+const AdminContent = React.lazy(() =>
+  import('./pages/admin/AdminContent.jsx').then((m) => ({ default: m.AdminContent }))
+);
+const AdminCoupons = React.lazy(() =>
+  import('./pages/admin/AdminCoupons.jsx').then((m) => ({ default: m.AdminCoupons }))
+);
+const AdminReports = React.lazy(() =>
+  import('./pages/admin/AdminReports.jsx').then((m) => ({ default: m.AdminReports }))
+);
+const AdminSettings = React.lazy(() =>
+  import('./pages/admin/AdminSettings.jsx').then((m) => ({ default: m.AdminSettings }))
+);
+const AdminBanners = React.lazy(() =>
+  import('./pages/admin/AdminBanners.jsx').then((m) => ({ default: m.AdminBanners }))
+);
+const AdminProfile = React.lazy(() =>
+  import('./pages/admin/AdminProfile.jsx').then((m) => ({ default: m.AdminProfile }))
+);
 
 import { MobileFloatingCartBar } from './components/MobileFloatingCartBar.jsx';
 import './App.css';
@@ -64,7 +103,9 @@ function StorefrontLayout({ onOpenAuth }) {
       <AdminLiveStoreBanner />
       <Navbar onOpenAuth={onOpenAuth} />
       <main className="flex-1">
-        <Outlet />
+        <React.Suspense fallback={null}>
+          <Outlet />
+        </React.Suspense>
       </main>
       <MobileFloatingCartBar />
       <Footer />
@@ -138,7 +179,20 @@ export default function App() {
                   </Route>
 
                   {/* Admin Management Portal (Protected by AdminLayout RBAC Guard) */}
-                  <Route path="/admin" element={<AdminLayout />}>
+                  <Route
+                    path="/admin"
+                    element={
+                      <React.Suspense
+                        fallback={
+                          <div className="min-h-screen bg-primary-bg p-6 flex flex-col items-center justify-center">
+                            <SkeletonDashboard />
+                          </div>
+                        }
+                      >
+                        <AdminLayout />
+                      </React.Suspense>
+                    }
+                  >
                     <Route index element={<Navigate to="/admin/dashboard" replace />} />
                     <Route path="dashboard" element={<AdminDashboard />} />
                     <Route path="orders" element={<AdminOrders />} />

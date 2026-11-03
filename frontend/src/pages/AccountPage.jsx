@@ -48,6 +48,7 @@ import {
 import { LocationPickerModal } from '../components/map/LocationPickerModal.jsx';
 import { Pagination } from '../components/Pagination.jsx';
 import { useNotifications } from '../context/NotificationContext.jsx';
+import { SkeletonAccountPage, SkeletonOrderList, SkeletonBase, SkeletonText } from '../components/skeleton/index.js';
 
 export function AccountPage({ onOpenAuth }) {
   const {
@@ -334,11 +335,7 @@ export function AccountPage({ onOpenAuth }) {
   }, [isAuthenticated, ordersPage]);
 
   if (authLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-primary-bg">
-        <RefreshCw className="w-8 h-8 text-brand animate-spin" />
-      </div>
-    );
+    return <SkeletonAccountPage />;
   }
 
   if (!isAuthenticated) {
@@ -699,9 +696,7 @@ export function AccountPage({ onOpenAuth }) {
         {activeTab === 'orders' && (
           <div className="space-y-4">
             {ordersLoading ? (
-              <div className="p-8 text-center">
-                <RefreshCw className="w-6 h-6 text-brand animate-spin mx-auto" />
-              </div>
+              <SkeletonOrderList count={3} />
             ) : orders.length === 0 ? (
               <div className="p-12 text-center rounded-2xl bg-surface border border-border-neutral space-y-3 shadow-xs">
                 <Package className="w-12 h-12 text-text-muted mx-auto" />
@@ -1503,9 +1498,17 @@ export function AccountPage({ onOpenAuth }) {
             </div>
 
             {notifLoading && notifications.length === 0 ? (
-              <div className="p-12 text-center rounded-2xl bg-surface border border-border-neutral text-xs text-text-muted">
-                <RefreshCw className="w-6 h-6 text-brand animate-spin mx-auto mb-2" />
-                Loading your notifications...
+              <div className="space-y-2.5" aria-busy="true" aria-label="Loading notifications">
+                {[1, 2, 3, 4].map((idx) => (
+                  <div key={idx} className="p-4 rounded-2xl border border-border-neutral bg-surface flex items-start gap-3 shadow-xs">
+                    <SkeletonBase className="w-9 h-9 rounded-xl shrink-0" />
+                    <div className="flex-1 space-y-2">
+                      <SkeletonText width="40%" height="h-3.5" />
+                      <SkeletonText width="80%" height="h-3" />
+                      <SkeletonText width="25%" height="h-2.5" />
+                    </div>
+                  </div>
+                ))}
               </div>
             ) : notifications.length === 0 ? (
               <div className="p-12 text-center rounded-2xl bg-surface border border-border-neutral space-y-3 shadow-xs">

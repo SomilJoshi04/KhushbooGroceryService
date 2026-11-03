@@ -11,6 +11,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { apiClient } from '../config/api.js';
 import { useSocket } from './SocketContext.jsx';
+import { swrCache } from '../utils/swrCache.js';
 
 const StoreSettingsContext = createContext(null);
 
@@ -64,6 +65,7 @@ export function StoreSettingsProvider({ children }) {
       const res = await apiClient.get('/v1/store/settings');
       if (res.data?.success && res.data?.data) {
         const d = res.data.data;
+        swrCache.set('store_settings', d, 5 * 60 * 1000);
         const minPaise = d.effectiveMinOrderAmountPaise ?? d.minOrderAmountPaise ?? 1000;
         const freePaise = d.effectiveFreeDeliveryThresholdPaise ?? d.freeDeliveryThresholdPaise ?? 49900;
         const feePaise = d.deliveryFeeBasePaise ?? 2500;

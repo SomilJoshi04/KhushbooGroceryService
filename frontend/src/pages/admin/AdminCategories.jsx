@@ -22,6 +22,8 @@ import {
   EyeOff,
 } from 'lucide-react';
 import { ImageUpload } from '../../components/common/ImageUpload.jsx';
+import { SkeletonCategoryGrid } from '../../components/skeleton/index.js';
+import { swrCache } from '../../utils/swrCache.js';
 
 export function AdminCategories() {
   const [categories, setCategories] = useState([]);
@@ -111,6 +113,9 @@ export function AdminCategories() {
         await apiClient.post('/v1/categories', payload);
       }
 
+      swrCache.invalidate('categories');
+      swrCache.invalidate('products');
+
       setModalOpen(false);
       await fetchCategories();
     } catch (err) {
@@ -130,6 +135,8 @@ export function AdminCategories() {
       } else {
         await apiClient.put(`/v1/categories/${cat._id}`, { isActive: true });
       }
+      swrCache.invalidate('categories');
+      swrCache.invalidate('products');
       await fetchCategories();
     } catch (err) {
       alert(err.message || 'Failed to update category status.');
@@ -157,10 +164,7 @@ export function AdminCategories() {
       </div>
 
       {loading ? (
-        <div className="p-16 text-center bg-surface border border-border-neutral rounded-2xl">
-          <RefreshCw className="w-8 h-8 text-brand animate-spin mx-auto mb-2" />
-          <p className="text-xs text-text-muted font-medium">Loading categories from MongoDB...</p>
-        </div>
+        <SkeletonCategoryGrid count={8} />
       ) : error ? (
         <div className="p-6 bg-red-50 border border-red-200 text-status-error rounded-2xl text-center">
           {error}

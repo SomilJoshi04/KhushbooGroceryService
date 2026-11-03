@@ -45,6 +45,8 @@ import { Pagination } from '../../components/Pagination.jsx';
 import { useBulkSelection } from '../../hooks/useBulkSelection.js';
 import { BulkActionBar } from '../../components/BulkActionBar.jsx';
 import { BulkConfirmModal } from '../../components/BulkConfirmModal.jsx';
+import { SkeletonTable } from '../../components/skeleton/index.js';
+import { swrCache } from '../../utils/swrCache.js';
 
 export function AdminBanners() {
   const [banners, setBanners] = useState([]);
@@ -396,6 +398,8 @@ export function AdminBanners() {
         notifySuccess('Promotional banner created and published successfully.');
       }
 
+      swrCache.invalidate('banners');
+
       setModalOpen(false);
       setEditingBanner(null);
       fetchBanners();
@@ -553,10 +557,7 @@ export function AdminBanners() {
       {/* Banners Table */}
       <div className="bg-surface border border-border-neutral rounded-2xl overflow-hidden shadow-xs">
         {loading ? (
-          <div className="p-12 text-center text-text-muted text-xs space-y-3">
-            <div className="w-8 h-8 border-3 border-brand border-t-transparent rounded-full animate-spin mx-auto" />
-            <p>Loading promotional banners...</p>
-          </div>
+          <SkeletonTable rows={5} columns={6} showToolbar={false} showPagination={true} />
         ) : banners.length === 0 ? (
           <div className="p-12 text-center text-text-muted text-xs space-y-4">
             <div className="w-14 h-14 rounded-2xl bg-surface-subtle border border-border-neutral flex items-center justify-center mx-auto text-brand">

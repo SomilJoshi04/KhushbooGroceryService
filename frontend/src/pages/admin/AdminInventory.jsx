@@ -27,6 +27,7 @@ import { Pagination } from '../../components/Pagination.jsx';
 import { useBulkSelection } from '../../hooks/useBulkSelection.js';
 import { BulkActionBar } from '../../components/BulkActionBar.jsx';
 import { BulkConfirmModal } from '../../components/BulkConfirmModal.jsx';
+import { SkeletonTable } from '../../components/skeleton/index.js';
 
 export function AdminInventory() {
   const [items, setItems] = useState([]);
@@ -383,10 +384,7 @@ export function AdminInventory() {
 
       {/* Inventory Table */}
       {loading ? (
-        <div className="p-16 text-center bg-surface border border-border-neutral rounded-2xl">
-          <RefreshCw className="w-8 h-8 text-brand animate-spin mx-auto mb-2" />
-          <p className="text-xs text-text-muted font-medium">Loading inventory data...</p>
-        </div>
+        <SkeletonTable rows={7} columns={6} showToolbar={false} showPagination={true} />
       ) : error ? (
         <div className="p-6 bg-red-50 border border-red-200 text-status-error rounded-2xl text-center space-y-2">
           <p className="font-semibold text-xs">{error}</p>

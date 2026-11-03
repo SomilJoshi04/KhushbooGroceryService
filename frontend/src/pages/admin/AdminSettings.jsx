@@ -35,6 +35,7 @@ import {
 } from 'lucide-react';
 import { LocationPickerModal } from '../../components/map/LocationPickerModal.jsx';
 import { testNotificationSound } from '../../utils/soundManager.js';
+import { SkeletonTitle, SkeletonText, SkeletonBase, SkeletonButton } from '../../components/skeleton/index.js';
 
 export function AdminSettings() {
   const [loading, setLoading] = useState(true);
@@ -180,9 +181,30 @@ export function AdminSettings() {
 
   if (loading) {
     return (
-      <div className="py-20 flex flex-col items-center justify-center text-text-muted">
-        <RefreshCw className="w-8 h-8 animate-spin text-brand mb-3" />
-        <p className="text-xs font-medium">Loading store configuration from database...</p>
+      <div className="space-y-6 max-w-5xl" aria-busy="true" aria-label="Loading store configuration">
+        <div className="flex items-center justify-between">
+          <div className="space-y-2">
+            <SkeletonTitle height="h-7" width="260px" />
+            <SkeletonText width="320px" height="h-3" />
+          </div>
+          <SkeletonBase className="w-9 h-9 rounded-xl" />
+        </div>
+
+        <div className="space-y-6">
+          {[1, 2, 3].map((card) => (
+            <div key={card} className="bg-surface border border-border-neutral rounded-2xl p-6 shadow-xs space-y-4">
+              <SkeletonTitle height="h-5" width="200px" />
+              <div className="space-y-3">
+                <SkeletonBase className="h-14 w-full rounded-xl" />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <SkeletonBase className="h-10 w-full rounded-xl" />
+                  <SkeletonBase className="h-10 w-full rounded-xl" />
+                </div>
+              </div>
+            </div>
+          ))}
+          <SkeletonButton className="w-36 h-10" />
+        </div>
       </div>
     );
   }

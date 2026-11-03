@@ -17,6 +17,7 @@ import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext.jsx';
 import { useStoreSettings } from '../../context/StoreSettingsContext.jsx';
 import { NotificationBell } from '../../components/NotificationBell.jsx';
+import { SkeletonDashboard } from '../../components/skeleton/index.js';
 import {
   LayoutDashboard,
   ShoppingBag,
@@ -363,7 +364,9 @@ export function AdminLayout() {
 
         {/* Content Area */}
         <main id="admin-main-scroll" className="flex-1 overflow-y-auto overflow-x-hidden min-w-0 bg-primary-bg p-3 sm:p-6 lg:p-8">
-          <Outlet />
+          <React.Suspense fallback={<SkeletonDashboard />}>
+            <Outlet />
+          </React.Suspense>
         </main>
       </div>
     </div>

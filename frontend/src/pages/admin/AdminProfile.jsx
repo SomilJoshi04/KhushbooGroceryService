@@ -12,6 +12,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext.jsx';
 import { apiClient } from '../../config/api.js';
+import { SkeletonAvatar, SkeletonTitle, SkeletonText, SkeletonBase, SkeletonButton, SkeletonBadge } from '../../components/skeleton/index.js';
 import {
   User as UserIcon,
   ShieldCheck,
@@ -100,9 +101,36 @@ export function AdminProfile() {
 
   if (loading) {
     return (
-      <div className="py-20 flex flex-col items-center justify-center text-text-muted">
-        <RefreshCw className="w-8 h-8 animate-spin text-brand mb-3" />
-        <p className="text-xs font-medium">Loading admin profile credentials...</p>
+      <div className="space-y-6 max-w-4xl" aria-busy="true" aria-label="Loading admin profile">
+        <div className="space-y-2">
+          <SkeletonTitle height="h-7" width="240px" />
+          <SkeletonText width="320px" height="h-3" />
+        </div>
+
+        {/* Profile Card */}
+        <div className="bg-surface border border-border-neutral rounded-2xl p-6 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-4">
+            <SkeletonAvatar size="w-14 h-14" />
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <SkeletonTitle height="h-5" width="160px" />
+                <SkeletonBadge width="w-24" height="h-5" />
+              </div>
+              <SkeletonText width="140px" height="h-3" />
+            </div>
+          </div>
+          <SkeletonButton className="w-36 h-9" />
+        </div>
+
+        {/* Details Card */}
+        <div className="bg-surface border border-border-neutral rounded-2xl p-6 shadow-xs space-y-4">
+          <SkeletonTitle height="h-5" width="180px" />
+          <div className="space-y-3">
+            <SkeletonBase className="h-10 w-full rounded-xl" />
+            <SkeletonBase className="h-10 w-full rounded-xl" />
+          </div>
+          <SkeletonButton className="w-28 h-9" />
+        </div>
       </div>
     );
   }

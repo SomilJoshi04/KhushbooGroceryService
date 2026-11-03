@@ -41,6 +41,7 @@ import { Pagination } from '../../components/Pagination.jsx';
 import { useBulkSelection } from '../../hooks/useBulkSelection.js';
 import { BulkActionBar } from '../../components/BulkActionBar.jsx';
 import { BulkConfirmModal } from '../../components/BulkConfirmModal.jsx';
+import { SkeletonTableRow } from '../../components/skeleton/index.js';
 
 export function AdminCustomers() {
   const [customers, setCustomers] = useState([]);
@@ -371,12 +372,9 @@ export function AdminCustomers() {
             </thead>
             <tbody className="divide-y divide-border-neutral">
               {loading ? (
-                <tr>
-                  <td colSpan={7} className="py-12 text-center text-text-muted">
-                    <Loader2 className="w-6 h-6 animate-spin mx-auto text-brand mb-2" />
-                    <span>Loading customer accounts...</span>
-                  </td>
-                </tr>
+                Array.from({ length: 6 }).map((_, i) => (
+                  <SkeletonTableRow key={i} columns={6} />
+                ))
               ) : customers.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="py-12 text-center text-text-muted">

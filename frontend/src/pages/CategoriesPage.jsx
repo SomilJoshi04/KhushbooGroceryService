@@ -13,28 +13,35 @@ import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { apiClient } from '../config/api.js';
 import { Search, Grid, ArrowRight, RefreshCw } from 'lucide-react';
+import { SkeletonCategoryGrid } from '../components/skeleton/index.js';
+import { swrCache } from '../utils/swrCache.js';
 
 export function CategoriesPage() {
-  const [categories, setCategories] = useState([]);
+  const cached = swrCache.get('categories');
+  const [categories, setCategories] = useState(() => cached?.data || []);
   const [search, setSearch] = useState('');
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => !cached?.data);
   const [error, setError] = useState(null);
 
   const fetchCategories = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await apiClient.get('/v1/categories');
-      if (res.data?.success && Array.isArray(res.data.data)) {
-        setCategories(res.data.data);
-      } else {
-        setCategories([]);
+    swrCache.fetchWithSWR(
+      'categories',
+      async () => {
+        const res = await apiClient.get('/v1/categories');
+        return Array.isArray(res.data?.data) ? res.data.data : [];
+      },
+      {
+        ttlMs: 5 * 60 * 1000,
+        onSuccess: (data) => {
+          setCategories(data);
+          setLoading(false);
+        },
+        onError: (err) => {
+          setError(err.message || 'Unable to load categories. Please try again.');
+          setLoading(false);
+        },
       }
-    } catch (err) {
-      setError(err.message || 'Unable to load categories. Please try again.');
-    } finally {
-      setLoading(false);
-    }
+    );
   };
 
   useEffect(() => {
@@ -89,20 +96,9 @@ export function CategoriesPage() {
         </div>
 
         {/* Categories Grid */}
-        {loading ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-            {[...Array(8)].map((_, idx) => (
-              <div
-                key={idx}
-                className="bg-surface border border-border-neutral rounded-2xl p-5 space-y-4 animate-pulse shadow-xs"
-              >
-                <div className="aspect-4/3 bg-surface-subtle rounded-xl" />
-                <div className="h-5 bg-surface-subtle rounded w-2/3" />
-                <div className="h-3 bg-surface-subtle rounded w-full" />
-              </div>
-            ))}
-          </div>
-        ) : error ? (
+        {loading && categories.length === 0 ? (
+          <SkeletonCategoryGrid count={8} />
+        ) : error && categories.length === 0 ? (
           <div className="p-8 rounded-2xl bg-status-error/10 border border-status-error/20 text-center text-status-error space-y-3">
             <p className="font-semibold text-sm">{error}</p>
             <button

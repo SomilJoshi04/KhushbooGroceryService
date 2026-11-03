@@ -51,4 +51,6 @@ const categorySchema = new mongoose.Schema(
   }
 );
 
+categorySchema.index({ isActive: 1, order: 1, name: 1 });
+
 export const Category = mongoose.model('Category', categorySchema);
