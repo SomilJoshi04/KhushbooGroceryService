@@ -240,6 +240,37 @@ const envSchema = z.object({
     .transform(Number)
     .default('10'),
   PUBLIC_BASE_URL: z.string().default(''),
+
+  // ── Browser Web Push (VAPID) ──────────────────────────────────────────────
+  VAPID_PUBLIC_KEY: z
+    .string({
+      required_error: 'VAPID_PUBLIC_KEY is required for Web Push notifications',
+      invalid_type_error: 'VAPID_PUBLIC_KEY must be a string',
+    })
+    .min(10, 'VAPID_PUBLIC_KEY must be a valid base64url public key'),
+
+  VAPID_PRIVATE_KEY: z
+    .string({
+      required_error: 'VAPID_PRIVATE_KEY is required for Web Push notifications',
+      invalid_type_error: 'VAPID_PRIVATE_KEY must be a string',
+    })
+    .min(10, 'VAPID_PRIVATE_KEY must be a valid base64url private key'),
+
+  VAPID_SUBJECT: z
+    .string({
+      required_error: 'VAPID_SUBJECT is required for Web Push notifications',
+      invalid_type_error: 'VAPID_SUBJECT must be a string',
+    })
+    .refine(
+      (v) => v.startsWith('mailto:') || v.startsWith('https://'),
+      { message: 'VAPID_SUBJECT must be a mailto: or https:// contact URI' }
+    )
+    .default('mailto:support@khushboogroceryservice.in'),
+
+  PUSH_ENCRYPTION_KEY: z
+    .string()
+    .min(16, 'PUSH_ENCRYPTION_KEY should be at least 16 characters if specified')
+    .optional(),
 }).refine((data) => {
   // In production, USE_DEV_OTP must NEVER be enabled!
   if (data.NODE_ENV === 'production' && data.USE_DEV_OTP) {

@@ -32,12 +32,61 @@ import {
   CreditCard,
   Banknote,
   Play,
+  Bell,
+  BellOff,
+  Send,
+  Smartphone,
 } from 'lucide-react';
 import { LocationPickerModal } from '../../components/map/LocationPickerModal.jsx';
 import { testNotificationSound } from '../../utils/soundManager.js';
+import { useNotifications } from '../../context/NotificationContext.jsx';
 import { SkeletonTitle, SkeletonText, SkeletonBase, SkeletonButton } from '../../components/skeleton/index.js';
 
 export function AdminSettings() {
+  const {
+    pushSupported,
+    isPushSubscribed,
+    pushLoading,
+    enablePush,
+    disablePush,
+    testPush,
+    desktopPermission,
+  } = useNotifications();
+
+  const [pushStatusMsg, setPushStatusMsg] = useState('');
+  const [pushErrorMsg, setPushErrorMsg] = useState('');
+  const [testingPush, setTestingPush] = useState(false);
+
+  const handleToggleAdminPush = async () => {
+    setPushStatusMsg('');
+    setPushErrorMsg('');
+    try {
+      if (isPushSubscribed) {
+        await disablePush();
+        setPushStatusMsg('Admin browser push alerts disabled on this device.');
+      } else {
+        await enablePush();
+        setPushStatusMsg('Admin browser push alerts enabled! You will now receive new-order alerts even when your browser tab is closed.');
+      }
+    } catch (err) {
+      setPushErrorMsg(err.message || 'Failed to update push settings.');
+    }
+  };
+
+  const handleTestAdminPush = async () => {
+    setPushStatusMsg('');
+    setPushErrorMsg('');
+    setTestingPush(true);
+    try {
+      const res = await testPush();
+      setPushStatusMsg(res?.message || 'Admin test push notification sent successfully.');
+    } catch (err) {
+      setPushErrorMsg(err.message || 'Failed to dispatch test notification.');
+    } finally {
+      setTestingPush(false);
+    }
+  };
+
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testingSound, setTestingSound] = useState(false);
@@ -376,6 +425,110 @@ export function AdminSettings() {
                 </>
               )}
             </button>
+          </div>
+        </div>
+
+        {/* Admin Web Push Notification Controls Card */}
+        <div className="bg-surface border border-border-neutral rounded-2xl p-6 shadow-xs space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-bold font-heading text-text-main flex items-center gap-2">
+                <Bell className="w-4 h-4 text-brand" />
+                Admin Browser Web Push (VAPID)
+              </h2>
+              <p className="text-[11px] text-text-muted mt-0.5">
+                Receive background OS desktop and mobile push notifications for incoming customer orders even when the admin panel tab is closed.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {isPushSubscribed && (
+                <button
+                  type="button"
+                  onClick={handleTestAdminPush}
+                  disabled={testingPush}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border border-brand/30 bg-brand-light text-brand hover:bg-brand/15 transition cursor-pointer shadow-xs disabled:opacity-50"
+                  title="Dispatch a test VAPID push notification to this admin device"
+                >
+                  <Send className="w-3.5 h-3.5 text-brand" />
+                  <span>{testingPush ? 'Dispatching...' : 'Test Admin Push'}</span>
+                </button>
+              )}
+            </div>
+          </div>
+
+          {pushStatusMsg && (
+            <div className="text-[11px] font-medium text-status-success bg-status-success/10 px-3 py-1.5 rounded-lg border border-status-success/20 flex items-center gap-2 animate-fadeIn">
+              <CheckCircle2 className="w-3.5 h-3.5 text-status-success shrink-0" />
+              <span>{pushStatusMsg}</span>
+            </div>
+          )}
+
+          {pushErrorMsg && (
+            <div className="text-[11px] font-medium text-status-error bg-status-error/10 px-3 py-1.5 rounded-lg border border-status-error/20 flex items-center gap-2 animate-fadeIn">
+              <AlertCircle className="w-3.5 h-3.5 text-status-error shrink-0" />
+              <span>{pushErrorMsg}</span>
+            </div>
+          )}
+
+          <div className="flex items-center justify-between p-4 bg-surface-subtle rounded-xl border border-border-neutral">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-text-main">Admin Device Web Push</span>
+                <span
+                  className={`px-2 py-0.5 text-[10px] font-bold rounded-full ${
+                    isPushSubscribed
+                      ? 'bg-emerald-100 text-status-success'
+                      : 'bg-zinc-200 text-text-muted'
+                  }`}
+                >
+                  {isPushSubscribed ? 'Subscribed' : 'Not Subscribed'}
+                </span>
+                {desktopPermission === 'denied' && (
+                  <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-status-error/15 text-status-error">
+                    Blocked in Browser
+                  </span>
+                )}
+              </div>
+              <p className="text-[11px] text-text-muted mt-0.5 max-w-xl">
+                When enabled, your current browser registers with standard VAPID push services to receive alerts for new orders and high-priority store events.
+              </p>
+            </div>
+
+            <div>
+              {!pushSupported ? (
+                <span className="text-xs text-text-muted bg-surface px-3 py-1.5 rounded-xl border border-border-neutral">
+                  Push Unsupported
+                </span>
+              ) : desktopPermission === 'denied' ? (
+                <span className="text-xs text-status-error font-medium">
+                  Allow notifications in browser
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  disabled={pushLoading}
+                  onClick={handleToggleAdminPush}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-semibold border transition shadow-xs cursor-pointer ${
+                    isPushSubscribed
+                      ? 'bg-emerald-50 text-status-success border-emerald-200 hover:bg-emerald-100'
+                      : 'bg-zinc-100 text-text-muted border-zinc-200 hover:bg-zinc-200'
+                  } ${pushLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                >
+                  {isPushSubscribed ? (
+                    <>
+                      <ToggleRight className="w-5 h-5 text-status-success" />
+                      <span>{pushLoading ? 'Updating...' : 'Push Enabled'}</span>
+                    </>
+                  ) : (
+                    <>
+                      <ToggleLeft className="w-5 h-5 text-text-muted" />
+                      <span>{pushLoading ? 'Updating...' : 'Enable Push'}</span>
+                    </>
+                  )}
+                </button>
+              )}
+            </div>
           </div>
         </div>
 

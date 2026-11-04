@@ -54,6 +54,7 @@ import uploadRoutes from './routes/uploadRoutes.js';
 import bannerRoutes from './routes/bannerRoutes.js';
 import cartRoutes from './routes/cartRoutes.js';
 import notificationRoutes from './routes/notificationRoutes.js';
+import pushRoutes from './routes/pushRoutes.js';
 import { ensureInitialAdminBootstrap } from './services/adminBootstrapService.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -326,6 +327,7 @@ app.use('/api/v1/content', contentRoutes);
 app.use('/api/v1/upload', uploadRoutes);
 app.use('/api/v1/banners', bannerRoutes);
 app.use('/api/v1/notifications', notificationRoutes);
+app.use('/api/v1/push', pushRoutes);
 app.use('/api/v1/cart', cartRoutes);
 app.use('/api/v1', catalogRoutes);
 app.use('/api/v1/foods', foodRoutes);
@@ -341,6 +343,7 @@ app.use('/api/content', contentRoutes);
 app.use('/api/upload', uploadRoutes);
 app.use('/api/banners', bannerRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/push', pushRoutes);
 app.use('/api/cart', cartRoutes);
 app.use('/api', catalogRoutes);
 app.use('/api/foods', foodRoutes);

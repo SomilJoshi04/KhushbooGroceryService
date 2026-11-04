@@ -48,6 +48,8 @@ import {
   Key,
   Eye,
   EyeOff,
+  BellOff,
+  Smartphone,
 } from 'lucide-react';
 import { LocationPickerModal } from '../components/map/LocationPickerModal.jsx';
 import { Pagination } from '../components/Pagination.jsx';
@@ -84,7 +86,48 @@ export function AccountPage({ onOpenAuth }) {
     deleteNotification: notifDelete,
     clearAllRead: notifClearAllRead,
     loading: notifLoading,
+    pushSupported,
+    isPushSubscribed,
+    pushLoading,
+    enablePush,
+    disablePush,
+    testPush,
+    desktopPermission,
   } = useNotifications();
+
+  const [pushStatusMessage, setPushStatusMessage] = useState('');
+  const [pushErrorMessage, setPushErrorMessage] = useState('');
+  const [testingPush, setTestingPush] = useState(false);
+
+  const handleTogglePush = async () => {
+    setPushStatusMessage('');
+    setPushErrorMessage('');
+    try {
+      if (isPushSubscribed) {
+        await disablePush();
+        setPushStatusMessage('Browser push notifications have been disabled on this device.');
+      } else {
+        await enablePush();
+        setPushStatusMessage('Browser push notifications enabled! You will now receive real-time order alerts even when the tab is closed.');
+      }
+    } catch (err) {
+      setPushErrorMessage(err.message || 'Failed to update push notification setting.');
+    }
+  };
+
+  const handleTestPush = async () => {
+    setPushStatusMessage('');
+    setPushErrorMessage('');
+    setTestingPush(true);
+    try {
+      const res = await testPush();
+      setPushStatusMessage(res?.message || 'Test push notification dispatched successfully.');
+    } catch (err) {
+      setPushErrorMessage(err.message || 'Failed to dispatch test notification.');
+    } finally {
+      setTestingPush(false);
+    }
+  };
 
   const ALLOWED_TABS = ['orders', 'addresses', 'profile', 'security', 'support', 'notifications'];
   const searchParams = new URLSearchParams(location.search);
@@ -1742,6 +1785,103 @@ export function AccountPage({ onOpenAuth }) {
                   </button>
                 )}
               </div>
+            </div>
+
+            {/* ── Web Push Notification Card ── */}
+            <div className="p-4 sm:p-5 rounded-2xl bg-surface border border-border-neutral shadow-xs space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="flex items-start gap-3.5">
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+                    isPushSubscribed ? 'bg-status-success/15 text-status-success' : 'bg-surface-subtle text-text-muted border border-border-neutral'
+                  }`}>
+                    {isPushSubscribed ? <Bell className="w-5 h-5" /> : <BellOff className="w-5 h-5" />}
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h4 className="font-heading font-bold text-sm text-text-main">
+                        Browser Push Notifications
+                      </h4>
+                      {isPushSubscribed ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-status-success/15 text-status-success">
+                          <CheckCircle2 className="w-3 h-3" />
+                          Active
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-surface-subtle text-text-muted border border-border-neutral">
+                          Inactive
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-text-muted mt-1 max-w-lg">
+                      Receive real-time order status, out-for-delivery, and doorstep alerts on this device even when the browser tab is closed.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 sm:self-center">
+                  {!pushSupported ? (
+                    <span className="text-xs text-text-muted bg-surface-subtle px-3 py-1.5 rounded-xl border border-border-neutral">
+                      Push unsupported in this browser
+                    </span>
+                  ) : desktopPermission === 'denied' ? (
+                    <span className="text-xs text-status-error bg-status-error/10 px-3 py-1.5 rounded-xl border border-status-error/20 flex items-center gap-1.5 font-medium">
+                      <AlertCircle className="w-3.5 h-3.5" />
+                      Blocked in browser settings
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={pushLoading}
+                      onClick={handleTogglePush}
+                      className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-brand focus:ring-offset-2 ${
+                        isPushSubscribed ? 'bg-brand' : 'bg-border-neutral'
+                      } ${pushLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      role="switch"
+                      aria-checked={isPushSubscribed}
+                      title={isPushSubscribed ? 'Disable browser push' : 'Enable browser push'}
+                    >
+                      <span
+                        aria-hidden="true"
+                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${
+                          isPushSubscribed ? 'translate-x-5' : 'translate-x-0'
+                        }`}
+                      />
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Status and Action Row */}
+              {isPushSubscribed && (
+                <div className="pt-2 border-t border-border-neutral/60 flex flex-wrap items-center justify-between gap-3 text-xs">
+                  <span className="text-text-muted">
+                    Device registered for VAPID web push alerts.
+                  </span>
+                  <button
+                    type="button"
+                    disabled={testingPush}
+                    onClick={handleTestPush}
+                    className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-surface hover:bg-surface-subtle border border-border-neutral font-semibold text-text-main transition shadow-xs disabled:opacity-50"
+                  >
+                    {testingPush ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3 text-brand" />}
+                    <span>{testingPush ? 'Sending...' : 'Send Test Notification'}</span>
+                  </button>
+                </div>
+              )}
+
+              {/* Status or Error Banner */}
+              {pushStatusMessage && (
+                <div className="p-2.5 rounded-xl bg-status-success/10 border border-status-success/20 text-status-success text-xs flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 shrink-0" />
+                  <span>{pushStatusMessage}</span>
+                </div>
+              )}
+              {pushErrorMessage && (
+                <div className="p-2.5 rounded-xl bg-status-error/10 border border-status-error/20 text-status-error text-xs flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>{pushErrorMessage}</span>
+                </div>
+              )}
             </div>
 
             {notifLoading && notifications.length === 0 ? (

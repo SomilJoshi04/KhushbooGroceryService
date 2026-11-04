@@ -31,6 +31,14 @@ import {
   unlockAudioWithInteraction,
 } from '../utils/soundManager.js';
 import { swrCache } from '../utils/swrCache.js';
+import {
+  isPushSupported,
+  getCurrentSubscription,
+  subscribeToPush,
+  unsubscribeFromPush,
+  sendTestPushNotification,
+  getPermissionState,
+} from '../utils/pushManager.js';
 
 const NotificationContext = createContext(null);
 
@@ -55,6 +63,11 @@ export function NotificationProvider({ children }) {
     }
     return 'denied';
   });
+
+  // Browser Web Push (VAPID) State
+  const [isPushSubscribed, setIsPushSubscribed] = useState(false);
+  const [pushLoading, setPushLoading] = useState(false);
+  const pushSupported = isPushSupported();
 
   // Stable references for socket listeners and observers
   const isNotificationCenterOpenRef = useRef(false);
@@ -184,6 +197,87 @@ export function NotificationProvider({ children }) {
       }
     }
     return false;
+  }, []);
+
+  // Synchronize Web Push subscription state with browser PushManager
+  useEffect(() => {
+    if (!isAuthenticated || !pushSupported) {
+      setIsPushSubscribed(false);
+      return;
+    }
+
+    let isMounted = true;
+    getCurrentSubscription()
+      .then((sub) => {
+        if (isMounted) {
+          setIsPushSubscribed(Boolean(sub));
+        }
+      })
+      .catch(() => {
+        if (isMounted) setIsPushSubscribed(false);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [isAuthenticated, pushSupported]);
+
+  // Listen to background Web Push notifications received via Service Worker postMessage
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return;
+
+    const handleSwMessage = (event) => {
+      if (event.data?.type === 'KHUSHBOO_PUSH_RECEIVED') {
+        fetchUnreadCount();
+        fetchNotifications(1);
+      }
+    };
+
+    navigator.serviceWorker.addEventListener('message', handleSwMessage);
+    return () => {
+      navigator.serviceWorker.removeEventListener('message', handleSwMessage);
+    };
+  }, []);
+
+  // Web Push subscribe handler
+  const enablePush = useCallback(async () => {
+    setPushLoading(true);
+    try {
+      const sub = await subscribeToPush();
+      setIsPushSubscribed(Boolean(sub));
+      setDesktopPermission('granted');
+      return { success: true, subscription: sub };
+    } catch (err) {
+      console.warn('[notifications] Failed to enable push:', err.message);
+      throw err;
+    } finally {
+      setPushLoading(false);
+    }
+  }, []);
+
+  // Web Push unsubscribe handler
+  const disablePush = useCallback(async () => {
+    setPushLoading(true);
+    try {
+      await unsubscribeFromPush();
+      setIsPushSubscribed(false);
+      return { success: true };
+    } catch (err) {
+      console.warn('[notifications] Failed to disable push:', err.message);
+      throw err;
+    } finally {
+      setPushLoading(false);
+    }
+  }, []);
+
+  // Web Push immediate test notification handler
+  const testPush = useCallback(async () => {
+    try {
+      return await sendTestPushNotification();
+    } catch (err) {
+      console.warn('[notifications] Failed to send test push:', err.message);
+      throw err;
+    }
   }, []);
 
   // Initialize browser audio unlock listener on mount
@@ -555,6 +649,13 @@ export function NotificationProvider({ children }) {
         registerBellElement,
         desktopPermission,
         requestDesktopPermission,
+        // Browser Web Push (VAPID) helpers
+        pushSupported,
+        isPushSubscribed,
+        pushLoading,
+        enablePush,
+        disablePush,
+        testPush,
       }}
     >
       {children}

@@ -13,6 +13,7 @@
 
 import { Notification } from '../models/Notification.js';
 import { emitToUser, emitToAdmins, emitToAll } from '../socket.js';
+import { dispatchPushForNotification } from './pushNotificationService.js';
 
 /**
  * Creates, persists, and delivers a notification.
@@ -132,6 +133,11 @@ export async function createNotification({
     } else if (targetRecipientId) {
       emitToUser(targetRecipientId.toString(), 'notification:new', safePayload);
     }
+
+    // 5. Deliver via Web Push (VAPID) asynchronously (non-blocking)
+    dispatchPushForNotification(notification).catch((pushErr) => {
+      console.warn(`[notificationService] Push dispatch warning: ${pushErr.message}`);
+    });
 
     return notification;
   } catch (err) {

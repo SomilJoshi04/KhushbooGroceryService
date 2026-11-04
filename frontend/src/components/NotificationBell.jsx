@@ -29,6 +29,7 @@ import {
   WifiOff,
   X,
   Volume2,
+  BellRing,
 } from 'lucide-react';
 import { useNotifications } from '../context/NotificationContext.jsx';
 
@@ -103,7 +104,13 @@ export function NotificationBell({ placement = 'customer' }) {
     setNotificationCenterOpen,
     desktopPermission,
     requestDesktopPermission,
+    pushSupported,
+    isPushSubscribed,
+    enablePush,
+    pushLoading,
   } = useNotifications();
+
+  const [pushDismissed, setPushDismissed] = useState(false);
 
   const [isOpen, setIsOpen] = useState(false);
   const [activeFilter, setActiveFilter] = useState('ALL'); // 'ALL' | 'UNREAD'
@@ -279,17 +286,37 @@ export function NotificationBell({ placement = 'customer' }) {
               </div>
             )}
 
-            {/* Desktop Notification Opt-in Prompt */}
-            {desktopPermission === 'default' && (
+            {/* Web Push / Desktop Notification Opt-in Prompt */}
+            {pushSupported && !isPushSubscribed && !pushDismissed && desktopPermission !== 'denied' && (
               <div className="px-3 py-1.5 bg-brand-light/40 border-b border-brand/20 flex items-center justify-between text-[11px] text-brand shrink-0">
-                <span className="truncate font-medium">Enable desktop alerts when tab is in background?</span>
-                <button
-                  type="button"
-                  onClick={requestDesktopPermission}
-                  className="px-2 py-0.5 bg-brand text-white font-bold rounded-md text-[10px] hover:bg-brand-hover transition shrink-0 ml-2 cursor-pointer shadow-2xs"
-                >
-                  Enable
-                </button>
+                <div className="flex items-center gap-1.5 min-w-0 pr-1">
+                  <BellRing className="w-3.5 h-3.5 shrink-0" />
+                  <span className="truncate font-medium">Receive order alerts when tab is closed?</span>
+                </div>
+                <div className="flex items-center gap-1 shrink-0 ml-1">
+                  <button
+                    type="button"
+                    disabled={pushLoading}
+                    onClick={async () => {
+                      try {
+                        await enablePush();
+                      } catch {
+                        // Handled in context
+                      }
+                    }}
+                    className="px-2 py-0.5 bg-brand text-white font-bold rounded-md text-[10px] hover:bg-brand-hover transition cursor-pointer shadow-2xs disabled:opacity-50"
+                  >
+                    {pushLoading ? 'Enabling...' : 'Enable'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPushDismissed(true)}
+                    className="p-0.5 text-text-muted hover:text-text-main rounded transition"
+                    title="Dismiss"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
               </div>
             )}
 
