@@ -99,12 +99,42 @@ export function NotificationBell({ placement = 'customer' }) {
     markAllAsRead,
     deleteNotification,
     clearAllRead,
+    registerBellElement,
+    setNotificationCenterOpen,
+    desktopPermission,
+    requestDesktopPermission,
   } = useNotifications();
 
   const [isOpen, setIsOpen] = useState(false);
   const [activeFilter, setActiveFilter] = useState('ALL'); // 'ALL' | 'UNREAD'
   const dropdownRef = useRef(null);
   const navigate = useNavigate();
+
+  // Register notification bell element with IntersectionObserver
+  useEffect(() => {
+    if (dropdownRef.current && typeof registerBellElement === 'function') {
+      registerBellElement(dropdownRef.current);
+    }
+    return () => {
+      if (typeof registerBellElement === 'function') {
+        registerBellElement(null);
+      }
+    };
+  }, [registerBellElement]);
+
+  // Synchronize notification center open state with context
+  useEffect(() => {
+    if (typeof setNotificationCenterOpen === 'function') {
+      setNotificationCenterOpen(isOpen);
+    }
+  }, [isOpen, setNotificationCenterOpen]);
+
+  // Listen for programmatic open requests (e.g. from floating toasts)
+  useEffect(() => {
+    const handleOpen = () => setIsOpen(true);
+    window.addEventListener('khushboo:open_notification_center', handleOpen);
+    return () => window.removeEventListener('khushboo:open_notification_center', handleOpen);
+  }, []);
 
   // Close dropdown on outside click or touch
   useEffect(() => {
@@ -245,6 +275,20 @@ export function NotificationBell({ placement = 'customer' }) {
                   className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-bold rounded-lg transition shrink-0 cursor-pointer shadow-xs active:scale-95"
                 >
                   Enable Sound
+                </button>
+              </div>
+            )}
+
+            {/* Desktop Notification Opt-in Prompt */}
+            {desktopPermission === 'default' && (
+              <div className="px-3 py-1.5 bg-brand-light/40 border-b border-brand/20 flex items-center justify-between text-[11px] text-brand shrink-0">
+                <span className="truncate font-medium">Enable desktop alerts when tab is in background?</span>
+                <button
+                  type="button"
+                  onClick={requestDesktopPermission}
+                  className="px-2 py-0.5 bg-brand text-white font-bold rounded-md text-[10px] hover:bg-brand-hover transition shrink-0 ml-2 cursor-pointer shadow-2xs"
+                >
+                  Enable
                 </button>
               </div>
             )}

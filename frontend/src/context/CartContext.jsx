@@ -218,7 +218,7 @@ export function CartProvider({ children }) {
       setCart([]);
       try {
         localStorage.removeItem('khushboo_cart');
-      } catch {}
+      } catch { }
       return;
     }
 
@@ -236,7 +236,7 @@ export function CartProvider({ children }) {
               pending = parsed;
             }
           }
-        } catch {}
+        } catch { }
 
         if (pending && !isResumingRef.current) {
           isResumingRef.current = true;
@@ -337,7 +337,7 @@ export function CartProvider({ children }) {
         setPendingCartAction(action);
         try {
           sessionStorage.setItem('khushboo_pending_cart_action', JSON.stringify(action));
-        } catch {}
+        } catch { }
 
         setIsGuestPromptOpen(true);
         return { success: false, reason: 'AUTH_REQUIRED', newQty: 0 };
@@ -607,8 +607,8 @@ export function CartProvider({ children }) {
               cartToast.type === 'warning'
                 ? 'rgba(234, 88, 12, 0.4)'
                 : cartToast.type === 'info'
-                ? 'rgba(100, 116, 139, 0.4)'
-                : 'rgba(22, 101, 52, 0.4)',
+                  ? 'rgba(100, 116, 139, 0.4)'
+                  : 'rgba(22, 101, 52, 0.4)',
           }}
         >
           <div className="flex items-center gap-2.5 min-w-0 flex-1">

@@ -1,11 +1,21 @@
 /**
- * Notification Context & State Management.
+ * Notification Context & Position-Aware Real-Time State Management.
  *
  * Implements:
  * - Single source of truth from MongoDB backed by REST endpoints.
- * - Reactive real-time updates via SocketContext.
- * - Optimistic UI updates for read and deletion operations.
- * - Unread count synchronization across devices and tabs.
+ * - Reactive real-time updates via SocketContext (`notification:new`).
+ * - Position-aware toast delivery:
+ *     - Displays floating in-app toasts when notifications arrive.
+ *     - Suppresses duplicate toasts if the notification centre dropdown is actively open.
+ *     - Never forces automatic page scrolling (preserves user browsing at any scroll position).
+ *     - FIFO toast queue capping (maximum 3 concurrent visible toasts).
+ * - Multi-tab and background tab coordination:
+ *     - Desktop Notification API integration for background tabs (when user permitted).
+ *     - Synchronizes unread counts and records upon returning to active tab (`visibilitychange`).
+ *     - Reconnection state synchronization on WebSocket connect.
+ * - IntersectionObserver tracking for notification bell viewport visibility.
+ * - Robust deduplication by persistent MongoDB notification ID.
+ * - Audio playback integration with cooldowns and browser autoplay restriction handling.
  *
  * @module context/NotificationContext
  */
@@ -35,7 +45,23 @@ export function NotificationProvider({ children }) {
   const [soundCooldownSeconds, setSoundCooldownSeconds] = useState(3);
   const [audioBlocked, setAudioBlocked] = useState(false);
 
-  // Keep ref to avoid stale closures in socket listener
+  // Position-aware toast notifications state
+  const [toasts, setToasts] = useState([]);
+  const [isNotificationCenterOpen, setIsNotificationCenterOpenState] = useState(false);
+  const [isBellInViewport, setIsBellInViewport] = useState(true);
+  const [desktopPermission, setDesktopPermission] = useState(() => {
+    if (typeof window !== 'undefined' && 'Notification' in window) {
+      return Notification.permission;
+    }
+    return 'denied';
+  });
+
+  // Stable references for socket listeners and observers
+  const isNotificationCenterOpenRef = useRef(false);
+  const displayedToastIdsRef = useRef(new Set());
+  const bellElementRef = useRef(null);
+  const observerRef = useRef(null);
+
   const soundConfigRef = useRef({
     globalSoundEnabled: true,
     soundCooldownSeconds: 3,
@@ -53,6 +79,112 @@ export function NotificationProvider({ children }) {
       userSoundEnabled: user?.soundEnabled ?? true,
     };
   }, [globalSoundEnabled, soundCooldownSeconds, user]);
+
+  // Sync notification center open state
+  const setNotificationCenterOpen = useCallback((isOpen) => {
+    isNotificationCenterOpenRef.current = isOpen;
+    setIsNotificationCenterOpenState(isOpen);
+  }, []);
+
+  // Programmatically open notification center
+  const openNotificationCenter = useCallback(() => {
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('khushboo:open_notification_center'));
+    }
+  }, []);
+
+  // Register notification bell element with IntersectionObserver
+  const registerBellElement = useCallback((node) => {
+    if (observerRef.current) {
+      observerRef.current.disconnect();
+      observerRef.current = null;
+    }
+
+    bellElementRef.current = node;
+
+    if (node && typeof window !== 'undefined' && 'IntersectionObserver' in window) {
+      // Immediate bounds check
+      try {
+        const rect = node.getBoundingClientRect();
+        const inView =
+          rect.top < window.innerHeight &&
+          rect.bottom > 0 &&
+          rect.left < window.innerWidth &&
+          rect.right > 0;
+        setIsBellInViewport(inView);
+      } catch {
+        setIsBellInViewport(true);
+      }
+
+      const observer = new IntersectionObserver(
+        ([entry]) => {
+          setIsBellInViewport(Boolean(entry?.isIntersecting));
+        },
+        { threshold: 0.1 }
+      );
+
+      observer.observe(node);
+      observerRef.current = observer;
+    }
+  }, []);
+
+  // Clean up observer on unmount
+  useEffect(() => {
+    return () => {
+      if (observerRef.current) {
+        observerRef.current.disconnect();
+        observerRef.current = null;
+      }
+    };
+  }, []);
+
+  // Dispatch a floating in-app toast
+  const dispatchToast = useCallback((notification) => {
+    if (!notification || !notification._id) return;
+
+    // Deduplicate: avoid displaying multiple toasts for the exact same notification
+    if (displayedToastIdsRef.current.has(notification._id)) {
+      return;
+    }
+    displayedToastIdsRef.current.add(notification._id);
+
+    setToasts((prev) => {
+      // Limit to maximum 3 visible toasts (drop oldest if at capacity)
+      const trimmed = prev.slice(0, 2);
+      return [
+        {
+          id: notification._id,
+          notification,
+          timestamp: Date.now(),
+        },
+        ...trimmed,
+      ];
+    });
+  }, []);
+
+  // Dismiss a toast by ID
+  const dismissToast = useCallback((toastId) => {
+    setToasts((prev) => prev.filter((t) => t.id !== toastId));
+  }, []);
+
+  // Clear all active toasts
+  const clearAllToasts = useCallback(() => {
+    setToasts([]);
+  }, []);
+
+  // Request native browser desktop notification permission
+  const requestDesktopPermission = useCallback(async () => {
+    if (typeof window !== 'undefined' && 'Notification' in window) {
+      try {
+        const perm = await Notification.requestPermission();
+        setDesktopPermission(perm);
+        return perm === 'granted';
+      } catch (err) {
+        console.warn('[notifications] Desktop permission error:', err.message);
+      }
+    }
+    return false;
+  }, []);
 
   // Initialize browser audio unlock listener on mount
   useEffect(() => {
@@ -73,28 +205,30 @@ export function NotificationProvider({ children }) {
     return success;
   }, []);
 
-  // Fetch initial global settings using shared SWR cache (deduplicated with StoreSettingsContext)
+  // Fetch initial global settings using shared SWR cache
   useEffect(() => {
     let isMounted = true;
-    swrCache.fetchWithSWR(
-      'store_settings',
-      async () => {
-        const res = await apiClient.get('/v1/store/settings');
-        return res.data?.data || null;
-      },
-      {
-        ttlMs: 5 * 60 * 1000,
-        onSuccess: (d) => {
-          if (!isMounted || !d?.notificationSettings) return;
-          if (typeof d.notificationSettings.soundEnabled === 'boolean') {
-            setGlobalSoundEnabled(d.notificationSettings.soundEnabled);
-          }
-          if (typeof d.notificationSettings.soundCooldownSeconds === 'number') {
-            setSoundCooldownSeconds(d.notificationSettings.soundCooldownSeconds);
-          }
+    swrCache
+      .fetchWithSWR(
+        'store_settings',
+        async () => {
+          const res = await apiClient.get('/v1/store/settings');
+          return res.data?.data || null;
         },
-      }
-    ).catch(() => {});
+        {
+          ttlMs: 5 * 60 * 1000,
+          onSuccess: (d) => {
+            if (!isMounted || !d?.notificationSettings) return;
+            if (typeof d.notificationSettings.soundEnabled === 'boolean') {
+              setGlobalSoundEnabled(d.notificationSettings.soundEnabled);
+            }
+            if (typeof d.notificationSettings.soundCooldownSeconds === 'number') {
+              setSoundCooldownSeconds(d.notificationSettings.soundCooldownSeconds);
+            }
+          },
+        }
+      )
+      .catch(() => {});
     return () => {
       isMounted = false;
     };
@@ -109,7 +243,7 @@ export function NotificationProvider({ children }) {
   });
 
   /**
-   * Fetches the authoritative unread count from the backend.
+   * Fetches authoritative unread count from backend.
    */
   const fetchUnreadCount = useCallback(async () => {
     if (!isAuthenticated) {
@@ -127,7 +261,7 @@ export function NotificationProvider({ children }) {
   }, [isAuthenticated]);
 
   /**
-   * Fetches paginated notifications from the backend.
+   * Fetches paginated notifications from backend.
    */
   const fetchNotifications = useCallback(
     async ({ page = 1, limit = 20, isRead, category } = {}) => {
@@ -173,8 +307,26 @@ export function NotificationProvider({ children }) {
     } else {
       setNotifications([]);
       setUnreadCount(0);
+      setToasts([]);
+      displayedToastIdsRef.current.clear();
     }
   }, [isAuthenticated, user?._id, fetchUnreadCount, fetchNotifications]);
+
+  // Synchronize notifications when user returns to active tab or WebSocket reconnects
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (typeof document === 'undefined') return;
+      if (document.visibilityState === 'visible' && isAuthenticated) {
+        fetchUnreadCount();
+        fetchNotifications({ page: 1, limit: 15 });
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [isAuthenticated, fetchUnreadCount, fetchNotifications]);
 
   // Listen to Socket.IO real-time notification events
   useEffect(() => {
@@ -183,17 +335,18 @@ export function NotificationProvider({ children }) {
     const handleNewNotification = (notification) => {
       if (!notification || !notification._id) return;
 
+      // 1. Update persistent notification history in state (deduplicated)
       setNotifications((prev) => {
-        // Prevent duplicate entries
         if (prev.some((n) => n._id === notification._id)) {
           return prev;
         }
         return [notification, ...prev];
       });
 
+      // 2. Increment unread badge counter immediately
       setUnreadCount((prev) => prev + 1);
 
-      // Play production notification sound (if eligible, enabled, and outside cooldown)
+      // 3. Play production notification sound (if eligible, enabled, and outside cooldown)
       const currentCfg = soundConfigRef.current;
       const isPathAdmin = typeof window !== 'undefined' && window.location.pathname.startsWith('/admin');
       const isNotifAdmin = notification.recipientRole === 'ALL_ADMINS';
@@ -212,7 +365,7 @@ export function NotificationProvider({ children }) {
         console.warn('[sound] Playback error suppressed:', err?.message);
       });
 
-      // Trigger live UI refresh for active order lists (admin orders and customer order tracking)
+      // 4. Trigger live UI refresh for active order lists (admin orders and customer order tracking)
       const isOrderEvent =
         notification.category === 'ORDER' ||
         (typeof notification.type === 'string' && notification.type.startsWith('ORDER_'));
@@ -220,17 +373,44 @@ export function NotificationProvider({ children }) {
         window.dispatchEvent(new CustomEvent('khushboo:order_state_changed', { detail: notification }));
       }
 
-      // Play soft browser notification if permission granted
-      try {
-        if ('Notification' in window && Notification.permission === 'granted') {
-          new Notification(notification.title || 'Khushboo Grocery', {
-            body: notification.message,
-            icon: '/websiteLogo.png',
-          });
+      // 5. Background Tab Handling
+      const isTabHidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
+      if (isTabHidden) {
+        // Tab is in background: deliver native browser desktop notification if permission was granted
+        try {
+          if ('Notification' in window && Notification.permission === 'granted') {
+            const nativeNotif = new Notification(notification.title || 'Khushboo Grocery', {
+              body: notification.message,
+              icon: '/websiteLogo.png',
+              badge: '/websiteLogo.png',
+            });
+            nativeNotif.onclick = () => {
+              window.focus();
+              if (notification.actionUrl) {
+                window.location.href = notification.actionUrl;
+              }
+            };
+          }
+        } catch {
+          // Ignore native notification errors
         }
-      } catch {
-        // Ignore native notification errors
+        // Do not display in-app toast when tab is not visible
+        return;
       }
+
+      // 6. Intelligent Position-Aware Toast Visibility Handling:
+      // If the notification centre dropdown is actively OPEN, the user is looking directly
+      // at the notification list where the item is already prepended at the top.
+      // In this case, avoid showing a duplicate floating toast.
+      const isCenterOpen = isNotificationCenterOpenRef.current;
+      if (isCenterOpen) {
+        return;
+      }
+
+      // If the notification centre is closed, display the in-app toast in a fixed position
+      // visible on the user's active viewport (whether at top or bottom of page, or bell is offscreen)
+      // without modifying their scroll position.
+      dispatchToast(notification);
     };
 
     const handleCountUpdate = (data) => {
@@ -250,16 +430,25 @@ export function NotificationProvider({ children }) {
       }
     };
 
+    const handleSocketReconnect = () => {
+      if (isAuthenticated) {
+        fetchUnreadCount();
+        fetchNotifications({ page: 1, limit: 15 });
+      }
+    };
+
     socket.on('notification:new', handleNewNotification);
     socket.on('notification:count', handleCountUpdate);
     socket.on('settings:updated', handleSettingsUpdate);
+    socket.on('connect', handleSocketReconnect);
 
     return () => {
       socket.off('notification:new', handleNewNotification);
       socket.off('notification:count', handleCountUpdate);
       socket.off('settings:updated', handleSettingsUpdate);
+      socket.off('connect', handleSocketReconnect);
     };
-  }, [socket]);
+  }, [socket, isAuthenticated, fetchUnreadCount, fetchNotifications, dispatchToast]);
 
   /**
    * Marks a single notification as read.
@@ -269,7 +458,9 @@ export function NotificationProvider({ children }) {
 
     // Optimistic local state update
     setNotifications((prev) =>
-      prev.map((n) => (n._id === notificationId ? { ...n, isRead: true, readAt: new Date().toISOString() } : n))
+      prev.map((n) =>
+        n._id === notificationId ? { ...n, isRead: true, readAt: new Date().toISOString() } : n
+      )
     );
     setUnreadCount((prev) => Math.max(0, prev - 1));
 
@@ -277,7 +468,6 @@ export function NotificationProvider({ children }) {
       await apiClient.patch(`/notifications/${notificationId}/read`);
     } catch (err) {
       console.warn('[notifications] Error marking as read:', err.message);
-      // Re-fetch on failure to maintain consistency
       fetchUnreadCount();
     }
   };
@@ -321,7 +511,7 @@ export function NotificationProvider({ children }) {
   };
 
   /**
-   * Clears all read notifications for the active user.
+   * Clears all read notifications for active user.
    */
   const clearAllRead = async () => {
     setNotifications((prev) => prev.filter((n) => !n.isRead));
@@ -353,6 +543,18 @@ export function NotificationProvider({ children }) {
         markAllAsRead,
         deleteNotification,
         clearAllRead,
+        // Position-aware toast & visibility helpers
+        toasts,
+        dispatchToast,
+        dismissToast,
+        clearAllToasts,
+        isNotificationCenterOpen,
+        setNotificationCenterOpen,
+        openNotificationCenter,
+        isBellInViewport,
+        registerBellElement,
+        desktopPermission,
+        requestDesktopPermission,
       }}
     >
       {children}
@@ -367,4 +569,3 @@ export function useNotifications() {
   }
   return context;
 }
-

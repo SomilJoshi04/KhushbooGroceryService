@@ -23,6 +23,7 @@ import { Footer } from './components/Footer.jsx';
 import { AuthModal } from './components/AuthModal.jsx';
 import { ScrollRestoration } from './components/ScrollRestoration.jsx';
 import { AdminLiveStoreBanner } from './components/AdminLiveStoreBanner.jsx';
+import { NotificationToastContainer } from './components/NotificationToastContainer.jsx';
 
 // Storefront Pages
 import { HomePage } from './pages/HomePage.jsx';
@@ -168,6 +169,8 @@ export default function App() {
       <AuthProvider>
         <SocketProvider>
           <NotificationProvider>
+            {/* Position-Aware Real-Time Notification Toasts (Global for Customer & Admin) */}
+            <NotificationToastContainer />
             <StoreSettingsProvider>
               <CartProvider>
                 {/* Application Routes */}
