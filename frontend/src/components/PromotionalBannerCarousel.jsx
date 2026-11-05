@@ -1,24 +1,25 @@
 /**
- * Promotional Banner Carousel Component — Khushboo Grocery Storefront.
- *
- * Implements:
- * - Strict fixed-height responsive container:
- *   - Desktop (lg+): 385px (matching exact reference screenshot)
- *   - Tablet (md): 320px
- *   - Small Tablet (sm): 250px
- *   - Mobile (<sm): 210px
- * - Consistent split layout: Left text & CTA (vertically centered) + Right image (100% cover with soft gradient fade).
- * - Clamped text lines (line-clamp-2) preventing any banner from expanding or shrinking the container.
- * - Auto-rotation (6s), pauses on hover and keyboard focus, reduced-motion compliant.
- * - Mobile touch swipe gestures.
- * - Stable zero-layout-shift skeleton and graceful empty state.
- *
- * @module components/PromotionalBannerCarousel
- */
+* Promotional Banner Carousel Component — Khushboo Grocery Storefront.
+*
+* Implements:
+* - Full-width promotional banner presentation preserving complete artwork.
+* - Responsive aspect ratio container:
+*   - Mobile (320px–480px): aspect-[2/1] (smooth scaling without cropping)
+*   - Small Tablet (481px–767px): aspect-[2.3/1]
+*   - Tablet (768px–1023px): aspect-[2.6/1]
+*   - Desktop (1024px+): aspect-[3/1] with max-h-[420px]
+* - Uses edge-to-edge `object-cover` without side pillarboxing or empty gaps.
+* - No side-by-side split layout: removes the 58%/42% split that cropped banners on mobile.
+* - Intelligent text overlay: displays HTML text over a soft gradient ONLY if `showTextOverlay` is enabled, avoiding text duplication when artwork has its own copy.
+* - Full-card clickability leading to banner target link.
+* - Auto-rotation (6s) with pause on hover/focus, swipe gestures, and keyboard navigation.
+*
+* @module components/PromotionalBannerCarousel
+*/
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ChevronLeft, ChevronRight, ArrowRight, Sparkles } from 'lucide-react';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { apiClient, resolveImageUrl, getApiUploadUrl, NEUTRAL_BANNER_PLACEHOLDER } from '../config/api.js';
 import { SkeletonBanner } from './skeleton/index.js';
 import { swrCache } from '../utils/swrCache.js';
@@ -107,7 +108,7 @@ export function PromotionalBannerCarousel({ className = '' }) {
     }
   };
 
-  // Content-shaped loading skeleton matches EXACT fixed dimensions of the loaded banner
+  // Content-shaped loading skeleton matches responsive aspect ratio of the loaded banner
   if (loading) {
     return <SkeletonBanner className={className} />;
   }
@@ -141,83 +142,33 @@ export function PromotionalBannerCarousel({ className = '' }) {
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
     >
-      {/* 
-        Fixed Dimensions Container:
-        - Mobile (<640px): 210px
-        - Small Tablet (640-767px): 250px
-        - Tablet / Laptop (768-1023px): 320px
-        - Desktop (1024px+): 385px (Exact reference size)
-      */}
-      <div className="h-[210px] sm:h-[250px] md:h-[320px] lg:h-[385px] w-full relative overflow-hidden rounded-2xl sm:rounded-3xl border border-border-neutral bg-surface shadow-xs transition-all select-none">
-        
-        {/* Banner Split Content: Always 100% height, strictly bounded */}
-        <div className="flex flex-row items-stretch justify-between w-full h-full">
-          
-          {/* Left Text & CTA Section (Vertically Centered) */}
-          <div className="w-[58%] sm:w-[55%] md:w-[48%] lg:w-[46%] h-full p-4 sm:p-6 md:p-8 lg:p-12 z-20 flex flex-col justify-center space-y-1.5 sm:space-y-2.5 md:space-y-3.5">
-            {/* Promotional Badge */}
-            {currentBanner.badge && (
-              <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 sm:px-3 sm:py-1 rounded-full bg-brand-light text-brand border border-brand/20 text-[10px] sm:text-xs font-bold tracking-wide w-fit shrink-0">
-                <Sparkles className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-brand" />
-                <span>{currentBanner.badge}</span>
-              </div>
-            )}
-
-            {/* Promotional Heading: Clamped to 2 lines to strictly preserve fixed height */}
-            <h2 className="text-base sm:text-xl md:text-2xl lg:text-[32px] xl:text-[34px] font-extrabold font-heading text-text-main tracking-tight leading-[1.18] line-clamp-2 shrink-0">
-              {currentBanner.title}
-            </h2>
-
-            {/* Promotional Subtitle / Description: Clamped to 2 lines */}
-            <p className="text-[11px] sm:text-xs md:text-sm text-text-muted leading-relaxed line-clamp-2 max-w-md shrink-0">
-              {currentBanner.subtitle}
-            </p>
-
-            {/* CTA Button */}
-            <div className="pt-0.5 sm:pt-1">
-              <button
-                type="button"
-                onClick={handleBannerAction}
-                className="inline-flex items-center gap-1.5 sm:gap-2 px-3.5 py-1.5 sm:px-4 sm:py-2 md:px-5 md:py-2.5 lg:px-6 lg:py-3 rounded-xl bg-brand hover:bg-brand-hover text-white text-[11px] sm:text-xs md:text-sm font-bold shadow-xs transition active:scale-98 focus:outline-none focus:ring-2 focus:ring-brand focus:ring-offset-2 w-fit shrink-0 cursor-pointer"
-              >
-                <span>{currentBanner.buttonText || 'Shop Now'}</span>
-                <ArrowRight className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-              </button>
-            </div>
-          </div>
-
-          {/* Right Imagery Section: Strictly 100% height, width-bounded, object-cover */}
-          <div className="w-[42%] sm:w-[45%] md:w-[52%] lg:w-[54%] h-full relative overflow-hidden bg-surface-subtle">
-            <picture className="w-full h-full block">
-              {currentBanner.mobileImage && (
-                <source media="(max-width: 767px)" srcSet={resolveImageUrl(currentBanner.mobileImage)} />
-              )}
-              <img
-                key={currentBanner._id || currentIndex}
-                src={resolveImageUrl(currentBanner.desktopImage)}
-                alt={currentBanner.title}
-                loading="lazy"
-                className="w-full h-full object-cover object-center block pointer-events-none transition-opacity duration-300"
-                onError={(e) => {
-                  if (!e.currentTarget.dataset.fallbackAttempted) {
-                    e.currentTarget.dataset.fallbackAttempted = 'true';
-                    const apiFallback = getApiUploadUrl(currentBanner.desktopImage);
-                    if (apiFallback) {
-                      e.currentTarget.src = apiFallback;
-                      return;
-                    }
-                  }
-                  e.currentTarget.src = FALLBACK_BANNER_IMAGE;
-                }}
-              />
-            </picture>
-
-            {/* 
-              Controlled gradient overlay:
-              Smooth transition from the clean surface card on the left into the photography on the right.
-            */}
-            <div className="absolute inset-y-0 left-0 w-16 sm:w-24 md:w-36 lg:w-48 bg-gradient-to-r from-surface via-surface/60 to-transparent pointer-events-none z-10" />
-          </div>
+      <div
+        onClick={handleBannerAction}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            handleBannerAction();
+          }
+        }}
+        className="relative w-full overflow-hidden rounded-2xl sm:rounded-3xl border border-border-neutral bg-surface shadow-xs transition-all select-none cursor-pointer group focus:outline-none focus:ring-2 focus:ring-brand focus:ring-offset-2"
+        title={currentBanner.title ? `Promotional Offer: ${currentBanner.title}` : 'Promotional Offer'}
+      >
+        {/* Full-Width Clickable Banner Image: edge-to-edge display with zero side spaces and zero infinite loops */}
+        <div className="relative w-full aspect-[2/1] sm:aspect-[2.2/1] md:aspect-[2.5/1] lg:aspect-[2.7/1] max-h-[420px] flex items-center justify-center overflow-hidden">
+          <img
+            key={currentBanner._id || currentIndex}
+            src={resolveImageUrl(currentBanner.desktopImage || currentBanner.mobileImage)}
+            alt={currentBanner.title || 'Promotional Banner'}
+            loading="lazy"
+            className="w-full h-full object-cover object-center block pointer-events-none transition-transform duration-500 group-hover:scale-[1.01]"
+            onError={(e) => {
+              if (e.currentTarget.dataset.failed) return;
+              e.currentTarget.dataset.failed = 'true';
+              e.currentTarget.src = FALLBACK_BANNER_IMAGE;
+            }}
+          />
         </div>
 
         {/* Carousel Navigation Arrows (visible only if multiple banners) */}
@@ -225,8 +176,11 @@ export function PromotionalBannerCarousel({ className = '' }) {
           <>
             <button
               type="button"
-              onClick={goToPrev}
-              className="absolute left-2.5 sm:left-4 top-1/2 -translate-y-1/2 w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-surface/90 hover:bg-surface border border-border-neutral text-text-main flex items-center justify-center shadow-md transition active:scale-95 focus:outline-none focus:ring-2 focus:ring-brand z-30 cursor-pointer"
+              onClick={(e) => {
+                e.stopPropagation();
+                goToPrev();
+              }}
+              className="absolute left-2 sm:left-4 top-1/2 -translate-y-1/2 w-7 h-7 sm:w-10 sm:h-10 rounded-full bg-surface/90 hover:bg-surface border border-border-neutral text-text-main flex items-center justify-center shadow-md transition active:scale-95 focus:outline-none focus:ring-2 focus:ring-brand z-30 cursor-pointer"
               aria-label="Previous promotional banner"
             >
               <ChevronLeft className="w-4 h-4 sm:w-5 sm:h-5" />
@@ -234,8 +188,11 @@ export function PromotionalBannerCarousel({ className = '' }) {
 
             <button
               type="button"
-              onClick={goToNext}
-              className="absolute right-2.5 sm:right-4 top-1/2 -translate-y-1/2 w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-surface/90 hover:bg-surface border border-border-neutral text-text-main flex items-center justify-center shadow-md transition active:scale-95 focus:outline-none focus:ring-2 focus:ring-brand z-30 cursor-pointer"
+              onClick={(e) => {
+                e.stopPropagation();
+                goToNext();
+              }}
+              className="absolute right-2 sm:right-4 top-1/2 -translate-y-1/2 w-7 h-7 sm:w-10 sm:h-10 rounded-full bg-surface/90 hover:bg-surface border border-border-neutral text-text-main flex items-center justify-center shadow-md transition active:scale-95 focus:outline-none focus:ring-2 focus:ring-brand z-30 cursor-pointer"
               aria-label="Next promotional banner"
             >
               <ChevronRight className="w-4 h-4 sm:w-5 sm:h-5" />
@@ -243,7 +200,7 @@ export function PromotionalBannerCarousel({ className = '' }) {
 
             {/* Pagination Indicators / Dots */}
             <div
-              className="absolute bottom-2.5 sm:bottom-3.5 left-1/2 -translate-x-1/2 flex items-center gap-1.5 z-30 px-2.5 sm:px-3 py-1 rounded-full bg-surface/85 backdrop-blur-xs border border-border-neutral/60 shadow-xs"
+              className="absolute bottom-2 sm:bottom-3.5 left-1/2 -translate-x-1/2 flex items-center gap-1.5 z-30 px-2.5 sm:px-3 py-1 rounded-full bg-surface/85 backdrop-blur-xs border border-border-neutral/60 shadow-xs"
               role="tablist"
               aria-label="Carousel navigation indicators"
             >
@@ -256,12 +213,14 @@ export function PromotionalBannerCarousel({ className = '' }) {
                     role="tab"
                     aria-selected={isActive}
                     aria-label={`Go to slide ${idx + 1}`}
-                    onClick={() => setCurrentIndex(idx)}
-                    className={`transition-all rounded-full cursor-pointer ${
-                      isActive
-                        ? 'w-5 h-2 bg-brand'
-                        : 'w-2 h-2 bg-text-muted/40 hover:bg-text-muted'
-                    }`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setCurrentIndex(idx);
+                    }}
+                    className={`transition-all rounded-full cursor-pointer ${isActive
+                      ? 'w-5 h-1.5 sm:h-2 bg-brand'
+                      : 'w-1.5 sm:w-2 h-1.5 sm:h-2 bg-text-muted/40 hover:bg-text-muted'
+                      }`}
                   />
                 );
               })}

@@ -13,7 +13,7 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ShoppingBag,
@@ -36,6 +36,7 @@ import {
   ArrowLeft,
   Trash2,
   Store,
+  Volume2,
 } from 'lucide-react';
 import { useCart } from '../context/CartContext.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
@@ -43,6 +44,7 @@ import { useStoreSettings } from '../context/StoreSettingsContext.jsx';
 import { apiClient, resolveImageUrl, getApiUploadUrl, NEUTRAL_PRODUCT_PLACEHOLDER } from '../config/api.js';
 import { LocationPickerModal } from '../components/map/LocationPickerModal.jsx';
 import { ImageWithSkeleton } from '../components/skeleton/index.js';
+import { useOrderSuccessSound } from '../hooks/useOrderSuccessSound.js';
 
 export function CartPage({ onOpenAuth }) {
   const {
@@ -87,7 +89,9 @@ export function CartPage({ onOpenAuth }) {
   const [couponError, setCouponError] = useState('');
 
   // Order State
+  const { orderId: paramOrderId } = useParams();
   const [orderConfirmed, setOrderConfirmed] = useState(false);
+  const [confirmedOrder, setConfirmedOrder] = useState(null);
   const [confirmedOrderNumber, setConfirmedOrderNumber] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [checkoutError, setCheckoutError] = useState('');
@@ -95,6 +99,56 @@ export function CartPage({ onOpenAuth }) {
   const [pincodeReason, setPincodeReason] = useState('');
   const [matchedZone, setMatchedZone] = useState(null);
   const [quickCategories, setQuickCategories] = useState([]);
+
+  // Integrate order success sound hook
+  const { autoplayBlocked, playManual } = useOrderSuccessSound(
+    orderConfirmed ? confirmedOrder || confirmedOrderNumber : null,
+    { enabled: orderConfirmed }
+  );
+
+  // Restore order from route param /order-success/:orderId if accessed directly
+  useEffect(() => {
+    if (paramOrderId) {
+      let isMounted = true;
+      apiClient
+        .get(`/v1/orders/${paramOrderId}`)
+        .then((res) => {
+          if (isMounted && res.data?.success && res.data?.data) {
+            const ord = res.data.data;
+            setConfirmedOrder(ord);
+            setConfirmedOrderNumber(ord.orderNumber);
+            if (ord.deliveryAddress?.street) setStreetAddress(ord.deliveryAddress.street);
+            if (ord.payment?.method) setPaymentMode(ord.payment.method);
+            setOrderConfirmed(true);
+          }
+        })
+        .catch((err) => {
+          if (import.meta.env?.DEV) console.warn('[CartPage] Failed to fetch route order:', err.message);
+        });
+      return () => {
+        isMounted = false;
+      };
+    }
+  }, [paramOrderId]);
+
+  // Restore order from session storage on refresh
+  useEffect(() => {
+    if (!paramOrderId && !orderConfirmed) {
+      try {
+        const saved = sessionStorage.getItem('kgs_active_order_success');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (parsed && parsed.orderNumber) {
+            setConfirmedOrder(parsed);
+            setConfirmedOrderNumber(parsed.orderNumber);
+            if (parsed.streetAddress) setStreetAddress(parsed.streetAddress);
+            if (parsed.paymentMode) setPaymentMode(parsed.paymentMode);
+            setOrderConfirmed(true);
+          }
+        }
+      } catch {}
+    }
+  }, [paramOrderId, orderConfirmed]);
 
   useEffect(() => {
     if (cart.length === 0) {
@@ -386,10 +440,24 @@ export function CartPage({ onOpenAuth }) {
       const res = await apiClient.post('/v1/orders', orderPayload);
 
       if (res.data?.success && res.data?.order) {
-        setConfirmedOrderNumber(res.data.order.orderNumber);
+        const orderData = res.data.order;
+        setConfirmedOrder(orderData);
+        setConfirmedOrderNumber(orderData.orderNumber);
         setOrderConfirmed(true);
         clearCart();
         setAppliedCoupon(null);
+        try {
+          sessionStorage.setItem(
+            'kgs_active_order_success',
+            JSON.stringify({
+              _id: orderData._id,
+              orderNumber: orderData.orderNumber,
+              orderStatus: orderData.orderStatus || 'PLACED',
+              paymentMode,
+              streetAddress,
+            })
+          );
+        } catch {}
       }
     } catch (err) {
       setCheckoutError(err.response?.data?.message || err.message || 'Unable to place order. Please try again.');
@@ -413,6 +481,21 @@ export function CartPage({ onOpenAuth }) {
           Your grocery order <span className="text-brand font-mono font-bold">#{confirmedOrderNumber}</span> has been placed successfully and is awaiting store confirmation.
         </p>
 
+        {/* Subtle Accessible Confirmation Sound Fallback (if browser autoplay policy blocked audio) */}
+        {autoplayBlocked && (
+          <div className="mb-6 animate-fadeIn">
+            <button
+              type="button"
+              onClick={playManual}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-surface hover:bg-surface-subtle border border-border-neutral text-xs font-bold text-brand shadow-xs transition cursor-pointer active:scale-98 focus:outline-none focus:ring-2 focus:ring-brand"
+              aria-label="Play order confirmation sound"
+            >
+              <Volume2 className="w-4 h-4 text-brand animate-pulse" />
+              <span>🔊 Play confirmation sound</span>
+            </button>
+          </div>
+        )}
+
         <div className="bg-surface p-5 rounded-2xl border border-border-neutral text-left max-w-md mx-auto mb-6 text-xs space-y-2.5 shadow-xs">
           <div className="flex justify-between text-text-main">
             <span className="text-text-muted">Payment Mode:</span>
@@ -433,6 +516,9 @@ export function CartPage({ onOpenAuth }) {
         <div className="flex flex-col sm:flex-row gap-3 justify-center max-w-md mx-auto">
           <Link
             to="/account"
+            onClick={() => {
+              sessionStorage.removeItem('kgs_active_order_success');
+            }}
             className="px-6 py-3 bg-brand hover:bg-brand-hover text-white font-bold text-xs rounded-xl shadow-xs transition flex items-center justify-center gap-1.5 focus:outline-none focus:ring-2 focus:ring-brand"
           >
             <span>Track Order in Account</span>
@@ -440,6 +526,9 @@ export function CartPage({ onOpenAuth }) {
           </Link>
           <Link
             to="/"
+            onClick={() => {
+              sessionStorage.removeItem('kgs_active_order_success');
+            }}
             className="px-6 py-3 bg-surface hover:bg-surface-subtle border border-border-neutral text-text-main font-semibold text-xs rounded-xl transition text-center focus:outline-none focus:ring-2 focus:ring-border-neutral shadow-xs"
           >
             Continue Shopping

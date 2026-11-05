@@ -50,6 +50,7 @@ const bannerBaseObject = z
     mobileImage: imagePathOrUrl.optional().or(z.literal('')).default(''),
     buttonText: z.string().trim().max(50, 'Button text cannot exceed 50 characters').optional().default('Shop Now'),
     buttonLink: safeLinkSchema.optional().default('/categories'),
+    showTextOverlay: z.boolean().optional().default(false),
     targetType: z.enum(['NONE', 'CATEGORY', 'PRODUCT', 'CUSTOM']).optional().default('CATEGORY'),
     targetId: z.string().trim().max(100).optional().default(''),
     priority: z.number().int('Priority must be an integer').min(0).max(10000).optional().default(0),

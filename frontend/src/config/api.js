@@ -69,33 +69,174 @@ export const apiClient = axios.create({
   },
 });
 
-// ── Response interceptor — sanitize errors before they reach components ────────
+/**
+ * Helper to sanitize Axios errors into safe, component-friendly Error objects.
+ * Never exposes raw Axios internal stack traces.
+ */
+function sanitizeApiError(error) {
+  if (error.response) {
+    const serverMessage =
+      error.response.data?.message ||
+      `Request failed with status ${error.response.status}.`;
+    const err = new Error(serverMessage);
+    err.response = error.response;
+    err.status = error.response.status;
+    return err;
+  }
+
+  if (error.request) {
+    const err = new Error('Cannot reach the server. Check your internet connection and try again.');
+    err.code = error.code || 'ERR_NETWORK';
+    return err;
+  }
+
+  return error instanceof Error ? error : new Error('An unexpected error occurred.');
+}
+
+// ── Concurrency & Refresh Queue Management ─────────────────────────────────────
+let isRefreshing = false;
+let refreshSubscribers = [];
+
+function subscribeTokenRefresh(cb) {
+  refreshSubscribers.push(cb);
+}
+
+function onRefreshed(token) {
+  refreshSubscribers.forEach((cb) => cb(token, null));
+  refreshSubscribers = [];
+}
+
+function onRefreshFailed(err) {
+  refreshSubscribers.forEach((cb) => cb(null, err));
+  refreshSubscribers = [];
+}
+
+/**
+ * Executes a silent refresh call against /auth/refresh using an isolated Axios call.
+ * Bypasses the interceptor chain to guarantee zero recursion or loop possibilities.
+ */
+export async function performSilentRefresh() {
+  const refreshUrl = `${API_BASE_URL}/auth/refresh`;
+  const response = await axios.post(
+    refreshUrl,
+    {},
+    {
+      withCredentials: true,
+      headers: { 'Content-Type': 'application/json' },
+      timeout: 10_000,
+    }
+  );
+  return response.data;
+}
+
+// ── Response interceptor: Silent Refresh, Concurrency Guard & Error Sanitization ──
 apiClient.interceptors.response.use(
   (response) => response,
-  (error) => {
+  async (error) => {
     // Pass through canceled / aborted requests cleanly so components can ignore them
     if (axios.isCancel(error) || error.name === 'CanceledError' || error.code === 'ERR_CANCELED') {
       return Promise.reject(error);
     }
 
-    if (error.response) {
-      // Server returned a response with a non-2xx status.
-      // Return only the server's safe message; never expose axios internals.
-      const serverMessage =
-        error.response.data?.message ||
-        `Request failed with status ${error.response.status}.`;
-      return Promise.reject(new Error(serverMessage));
+    const originalRequest = error.config;
+
+    // Detect 401 Unauthorized on protected routes eligible for silent refresh
+    if (error.response && error.response.status === 401 && originalRequest && !originalRequest._retry) {
+      const url = String(originalRequest.url || '');
+
+      // CRITICAL (Requirement 9): Never attempt refresh on auth endpoints to prevent infinite loops
+      const isAuthEndpoint =
+        url.includes('/auth/login') ||
+        url.includes('/auth/admin/login') ||
+        url.includes('/auth/refresh') ||
+        url.includes('/auth/register') ||
+        url.includes('/auth/logout') ||
+        url.includes('/auth/otp/verify') ||
+        url.includes('/auth/otp/request') ||
+        url.includes('/auth/forgot-password') ||
+        url.includes('/auth/reset-password') ||
+        url.includes('/auth/claim/');
+
+      if (isAuthEndpoint) {
+        return Promise.reject(sanitizeApiError(error));
+      }
+
+      originalRequest._retry = true;
+
+      // CRITICAL (Requirement 10): Handle Multiple Simultaneous 401s
+      // If a refresh is already in progress, queue this request until the in-flight refresh completes
+      if (isRefreshing) {
+        return new Promise((resolve, reject) => {
+          subscribeTokenRefresh((newToken, refreshErr) => {
+            if (refreshErr || !newToken) {
+              return reject(sanitizeApiError(error));
+            }
+            originalRequest.headers = originalRequest.headers || {};
+            originalRequest.headers['Authorization'] = `Bearer ${newToken}`;
+            resolve(apiClient(originalRequest));
+          });
+        });
+      }
+
+      isRefreshing = true;
+
+      try {
+        const refreshData = await performSilentRefresh();
+        const newToken = refreshData?.token || refreshData?.accessToken;
+
+        if (newToken) {
+          // Update default authorization header for subsequent API calls
+          apiClient.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
+
+          if (typeof window !== 'undefined' && window.localStorage) {
+            window.localStorage.setItem('khushboo_token', newToken);
+          }
+
+          // Broadcast token update so AuthContext and open tabs update synchronously
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(
+              new CustomEvent('khushboo:token_refreshed', {
+                detail: { token: newToken, user: refreshData.user },
+              })
+            );
+          }
+
+          // Flush queued concurrent requests with the new token
+          onRefreshed(newToken);
+
+          // Retry the original request
+          originalRequest.headers = originalRequest.headers || {};
+          originalRequest.headers['Authorization'] = `Bearer ${newToken}`;
+          return apiClient(originalRequest);
+        } else {
+          throw new Error('Refresh endpoint returned no token');
+        }
+      } catch (refreshErr) {
+        // Determine whether this was a definitive authentication failure or temporary network issue
+        const isDefinitiveAuthFailure =
+          refreshErr.response &&
+          (refreshErr.response.status === 401 || refreshErr.response.status === 403);
+
+        onRefreshFailed(refreshErr);
+
+        if (isDefinitiveAuthFailure) {
+          // Session is genuinely invalid or expired: clear client auth state and broadcast
+          delete apiClient.defaults.headers.common['Authorization'];
+          if (typeof window !== 'undefined') {
+            if (window.localStorage) {
+              window.localStorage.removeItem('khushboo_token');
+            }
+            window.dispatchEvent(new CustomEvent('khushboo:auth_session_expired'));
+          }
+        }
+
+        return Promise.reject(sanitizeApiError(error));
+      } finally {
+        isRefreshing = false;
+      }
     }
 
-    if (error.request) {
-      // Request was made but no response received (network error, timeout).
-      return Promise.reject(
-        new Error('Cannot reach the server. Check your internet connection and try again.')
-      );
-    }
-
-    // Something else happened.
-    return Promise.reject(new Error('An unexpected error occurred.'));
+    return Promise.reject(sanitizeApiError(error));
   }
 );
 

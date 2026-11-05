@@ -190,6 +190,8 @@ export default function App() {
                     <Route path="/categories/:slug" element={<CategoryDetailPage />} />
                     <Route path="/products/:slug" element={<ProductDetailPage />} />
                     <Route path="/cart" element={<CartPage onOpenAuth={() => setIsAuthOpen(true)} />} />
+                    <Route path="/order-success" element={<CartPage onOpenAuth={() => setIsAuthOpen(true)} />} />
+                    <Route path="/order-success/:orderId" element={<CartPage onOpenAuth={() => setIsAuthOpen(true)} />} />
                     <Route path="/account" element={<AccountRoute onOpenAuth={() => setIsAuthOpen(true)} />} />
                     <Route path="/account/*" element={<AccountRoute onOpenAuth={() => setIsAuthOpen(true)} />} />
                     <Route path="/privacy-policy" element={<PrivacyPolicyPage />} />

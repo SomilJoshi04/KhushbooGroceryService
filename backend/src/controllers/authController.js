@@ -1,18 +1,5 @@
 /**
- * Authentication and User Controller.
- *
- * Implements:
- * - Customer Registration with unique username & email, strong password policy, and email verification.
- * - Single-use cryptographic Email Verification tokens with expiration and rate limiting.
- * - Dual Identifier Customer Login (Email OR Username + Password).
- * - Anti-brute-force account lockout and timing-safe authentication.
- * - Rotating refresh tokens stored as SHA-256 hashes in MongoDB with HttpOnly cookies.
- * - Single and All-device session revocation.
- * - Token-based Password Reset and Change Password workflows.
- * - Legacy Phone Account Claim flow preserving all order, address, and cart data.
- * - Administrative credentials login with bcrypt and audit logging.
- * - Profile and delivery address management.
- *
+
  * @module controllers/authController
  */
 
@@ -46,6 +33,8 @@ import {
   clearAuthCookies,
   generateOtp,
   hashOtp,
+  issueUserSession,
+  getRefreshTokenDurationMs,
   REFRESH_COOKIE_NAME,
 } from '../utils/token.js';
 import { env } from '../config/env.js';
@@ -407,44 +396,9 @@ export async function login(req, res, next) {
     user.lockUntil = null;
     user.lastLoginAt = new Date();
 
-    // Generate short-lived access token
-    const tokenPayload = {
-      id: user._id.toString(),
-      role: user.role,
-      email: user.email,
-      username: user.username,
-      sessionVersion: user.sessionVersion || 1,
-    };
-    const accessToken = generateAccessToken(tokenPayload);
-
-    // Generate rotating refresh token
-    const { tokenId, rawToken: rawRefreshToken } = generateRefreshToken();
-    const refreshTokenHash = hashToken(rawRefreshToken);
-    const refreshExpiry = new Date(
-      Date.now() + (rememberMe ? 7 * 24 * 60 * 60 * 1000 : 24 * 60 * 60 * 1000)
-    );
-
-    // Clean expired refresh tokens and enforce maximum active sessions cap (10)
-    user.refreshTokens = (user.refreshTokens || []).filter((t) => t.expiresAt > new Date());
-    if (user.refreshTokens.length >= 10) {
-      user.refreshTokens.shift();
-    }
-
-    user.refreshTokens.push({
-      tokenId,
-      tokenHash: refreshTokenHash,
-      expiresAt: refreshExpiry,
-      userAgent: req.headers['user-agent'] || '',
-      ipAddress: req.ip || '',
-    });
-
-    await user.save();
-
-    // Set secure HttpOnly cookies
-    setAuthCookies(res, {
-      accessToken,
-      refreshToken: rawRefreshToken,
+    const { accessToken } = await issueUserSession(res, user, {
       rememberMe: Boolean(rememberMe),
+      req,
     });
 
     res.json({
@@ -523,13 +477,13 @@ export async function refreshToken(req, res, next) {
 
     const { tokenId: newId, rawToken: newRawRefreshToken } = generateRefreshToken();
     const newRefreshTokenHash = hashToken(newRawRefreshToken);
-    const newRefreshExpiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    const newRefreshExpiry = new Date(Date.now() + getRefreshTokenDurationMs(true));
 
     user.refreshTokens.push({
       tokenId: newId,
       tokenHash: newRefreshTokenHash,
       expiresAt: newRefreshExpiry,
-      userAgent: req.headers['user-agent'] || '',
+      userAgent: (req.headers['user-agent'] || '').slice(0, 300),
       ipAddress: req.ip || '',
     });
 
@@ -538,6 +492,7 @@ export async function refreshToken(req, res, next) {
     const tokenPayload = {
       id: user._id.toString(),
       role: user.role,
+      phone: user.phone,
       email: user.email,
       username: user.username,
       sessionVersion: user.sessionVersion || 1,
@@ -556,6 +511,7 @@ export async function refreshToken(req, res, next) {
       requestId: req.id,
       token: newAccessToken,
       accessToken: newAccessToken,
+      user: user.toSafeObject(),
     });
   } catch (err) {
     next(err);
@@ -785,17 +741,8 @@ export async function changePassword(req, res, next) {
     user.refreshTokens = [];
     await user.save();
 
-    // Issue fresh session for the current client
-    const tokenPayload = {
-      id: user._id.toString(),
-      role: user.role,
-      email: user.email,
-      username: user.username,
-      sessionVersion: user.sessionVersion,
-    };
-    const accessToken = generateAccessToken(tokenPayload);
-
-    setAuthCookies(res, { accessToken, rememberMe: true });
+    // Issue fresh session with refresh token for the current client
+    const { accessToken } = await issueUserSession(res, user, { rememberMe: true, req });
 
     try {
       await sendPasswordChangedNotification(user.email, user.name || user.fullName);
@@ -808,6 +755,7 @@ export async function changePassword(req, res, next) {
       requestId: req.id,
       message: 'Password changed successfully.',
       token: accessToken,
+      accessToken,
     });
   } catch (err) {
     next(err);
@@ -1087,24 +1035,16 @@ export async function adminLogin(req, res, next) {
       requestId: req.id,
     });
 
-    const tokenPayload = {
-      id: user._id.toString(),
-      role: user.role,
-      phone: user.phone,
-      email: user.email,
-      sessionVersion: user.sessionVersion || 1,
-    };
-
-    const token = generateAccessToken(tokenPayload);
-    setAuthCookies(res, { accessToken: token, rememberMe: true });
+    // Issue fresh administrative session with rotating refresh token and secure HttpOnly cookies
+    const { accessToken } = await issueUserSession(res, user, { rememberMe: true, req });
 
     res.json({
       success: true,
       requestId: req.id,
       message: 'Admin authentication successful.',
       user: user.toSafeObject(),
-      token,
-      accessToken: token,
+      token: accessToken,
+      accessToken,
     });
   } catch (err) {
     next(err);
@@ -1671,15 +1611,8 @@ export async function verifyOtp(req, res, next) {
     user.lastLoginAt = new Date();
     await user.save();
 
-    const tokenPayload = {
-      id: user._id.toString(),
-      role: user.role,
-      phone: user.phone,
-      sessionVersion: user.sessionVersion || 1,
-    };
-
-    const token = generateAccessToken(tokenPayload);
-    setAuthCookies(res, { accessToken: token, rememberMe: true });
+    // Issue fresh customer session with rotating refresh token and secure HttpOnly cookies
+    const { accessToken } = await issueUserSession(res, user, { rememberMe: true, req });
 
     res.json({
       success: true,
@@ -1687,8 +1620,8 @@ export async function verifyOtp(req, res, next) {
       message: isNewCustomer ? 'Welcome to Khushboo Food Service!' : 'Login successful.',
       isNewCustomer,
       user: user.toSafeObject(),
-      token,
-      accessToken: token,
+      token: accessToken,
+      accessToken,
     });
   } catch (err) {
     next(err);

@@ -67,6 +67,10 @@ const bannerSchema = new mongoose.Schema(
       maxlength: [250, 'Destination link cannot exceed 250 characters'],
       default: '/categories',
     },
+    showTextOverlay: {
+      type: Boolean,
+      default: false,
+    },
     targetType: {
       type: String,
       enum: ['NONE', 'CATEGORY', 'PRODUCT', 'CUSTOM'],

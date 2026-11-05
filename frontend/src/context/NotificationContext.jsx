@@ -248,6 +248,9 @@ export function NotificationProvider({ children }) {
       setDesktopPermission('granted');
       return { success: true, subscription: sub };
     } catch (err) {
+      if (typeof window !== 'undefined' && 'Notification' in window) {
+        setDesktopPermission(Notification.permission);
+      }
       console.warn('[notifications] Failed to enable push:', err.message);
       throw err;
     } finally {
@@ -441,23 +444,31 @@ export function NotificationProvider({ children }) {
       setUnreadCount((prev) => prev + 1);
 
       // 3. Play production notification sound (if eligible, enabled, and outside cooldown)
-      const currentCfg = soundConfigRef.current;
-      const isPathAdmin = typeof window !== 'undefined' && window.location.pathname.startsWith('/admin');
-      const isNotifAdmin = notification.recipientRole === 'ALL_ADMINS';
-      const effectiveRole =
-        isNotifAdmin || isPathAdmin
-          ? (['ADMIN', 'SUPER_ADMIN', 'STAFF'].includes(currentCfg.userRole) ? currentCfg.userRole : 'ADMIN')
-          : currentCfg.userRole;
+      // Suppress generic notification chime for customer ORDER_CREATED event because
+      // the customer storefront order-success screen plays the dedicated /zomato_sms.mp3 sound!
+      const isCustomerOrderCreated =
+        notification.type === 'ORDER_CREATED' &&
+        notification.recipientRole === 'CUSTOMER';
 
-      playNotificationSound({
-        notification,
-        userRole: effectiveRole,
-        globalSoundEnabled: currentCfg.globalSoundEnabled,
-        userSoundEnabled: currentCfg.userSoundEnabled,
-        cooldownSeconds: currentCfg.soundCooldownSeconds,
-      }).catch((err) => {
-        console.warn('[sound] Playback error suppressed:', err?.message);
-      });
+      if (!isCustomerOrderCreated) {
+        const currentCfg = soundConfigRef.current;
+        const isPathAdmin = typeof window !== 'undefined' && window.location.pathname.startsWith('/admin');
+        const isNotifAdmin = notification.recipientRole === 'ALL_ADMINS';
+        const effectiveRole =
+          isNotifAdmin || isPathAdmin
+            ? (['ADMIN', 'SUPER_ADMIN', 'STAFF'].includes(currentCfg.userRole) ? currentCfg.userRole : 'ADMIN')
+            : currentCfg.userRole;
+
+        playNotificationSound({
+          notification,
+          userRole: effectiveRole,
+          globalSoundEnabled: currentCfg.globalSoundEnabled,
+          userSoundEnabled: currentCfg.userSoundEnabled,
+          cooldownSeconds: currentCfg.soundCooldownSeconds,
+        }).catch((err) => {
+          console.warn('[sound] Playback error suppressed:', err?.message);
+        });
+      }
 
       // 4. Trigger live UI refresh for active order lists (admin orders and customer order tracking)
       const isOrderEvent =

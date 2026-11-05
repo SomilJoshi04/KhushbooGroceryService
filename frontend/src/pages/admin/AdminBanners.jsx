@@ -83,6 +83,7 @@ export function AdminBanners() {
     mobileImage: '',
     buttonText: 'Shop Now',
     buttonLink: '/categories',
+    showTextOverlay: false,
     targetType: 'CATEGORY',
     targetId: '',
     priority: 0,
@@ -249,6 +250,7 @@ export function AdminBanners() {
       mobileImage: banner.mobileImage || '',
       buttonText: banner.buttonText || 'Shop Now',
       buttonLink: banner.buttonLink || '/categories',
+      showTextOverlay: Boolean(banner.showTextOverlay),
       targetType: banner.targetType || 'CATEGORY',
       targetId: banner.targetId || '',
       priority: banner.priority ?? 0,
@@ -382,6 +384,7 @@ export function AdminBanners() {
         mobileImage: formData.mobileImage.trim() || undefined,
         buttonText: formData.buttonText.trim() || 'Shop Now',
         buttonLink: formData.buttonLink.trim() || '/categories',
+        showTextOverlay: Boolean(formData.showTextOverlay),
         targetType: formData.targetType,
         targetId: formData.targetId.trim(),
         priority: Number(formData.priority) || 0,
@@ -1103,34 +1106,17 @@ export function AdminBanners() {
                 </div>
 
                 {/* Live Preview Card */}
-                {formData.title && formData.desktopImage && (
+                {formData.desktopImage && (
                   <div className="space-y-2 pt-2">
                     <span className="text-xs font-bold text-text-muted uppercase tracking-wider block">
-                      Live Storefront Preview
+                      Live Storefront Preview (Edge-to-Edge Banner)
                     </span>
-                    <div className="border border-border-neutral rounded-2xl overflow-hidden bg-surface p-4 sm:p-6 flex flex-col md:flex-row items-center justify-between gap-4">
-                      <div className="flex-1 space-y-2">
-                        {formData.badge && (
-                          <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-brand-light text-brand font-bold border border-brand/20">
-                            {formData.badge}
-                          </span>
-                        )}
-                        <h4 className="text-lg sm:text-xl font-bold font-heading text-text-main">
-                          {formData.title}
-                        </h4>
-                        <p className="text-xs text-text-muted line-clamp-2">{formData.subtitle}</p>
-                        <span className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-brand text-white font-bold text-xs mt-2">
-                          <span>{formData.buttonText || 'Shop Now'}</span>
-                          <ArrowRight className="w-3.5 h-3.5" />
-                        </span>
-                      </div>
-                      <div className="w-full md:w-48 h-32 rounded-xl overflow-hidden border border-border-neutral bg-surface-subtle shrink-0">
-                        <img
-                          src={resolveImageUrl(formData.desktopImage)}
-                          alt="Preview"
-                          className="w-full h-full object-cover"
-                        />
-                      </div>
+                    <div className="relative border border-border-neutral rounded-2xl overflow-hidden shadow-xs aspect-[2.3/1] max-h-56 flex items-center justify-center">
+                      <img
+                        src={resolveImageUrl(formData.desktopImage)}
+                        alt="Preview"
+                        className="w-full h-full object-cover object-center"
+                      />
                     </div>
                   </div>
                 )}
@@ -1216,44 +1202,18 @@ export function AdminBanners() {
                   previewDevice === 'mobile' ? 'max-w-sm border-4 border-gray-800 rounded-3xl overflow-hidden shadow-2xl p-2 bg-surface' : 'max-w-3xl'
                 }`}
               >
-                <div className={`rounded-2xl sm:rounded-3xl border border-border-neutral overflow-hidden bg-surface shadow-md flex flex-row items-stretch justify-between w-full select-none ${
-                  previewDevice === 'mobile' ? 'h-[210px]' : 'h-[320px] md:h-[385px]'
+                <div className={`relative rounded-2xl sm:rounded-3xl border border-border-neutral overflow-hidden shadow-md w-full select-none flex items-center justify-center ${
+                  previewDevice === 'mobile' ? 'aspect-[2/1]' : 'aspect-[2.6/1]'
                 }`}>
-                  <div className={`${previewDevice === 'mobile' ? 'w-[58%] p-4 space-y-1.5' : 'w-[48%] p-6 md:p-10 space-y-3'} h-full flex flex-col justify-center`}>
-                    {previewBanner.badge && (
-                      <span className="inline-flex items-center gap-1 text-[10px] sm:text-xs font-bold px-2.5 py-0.5 rounded-full bg-brand-light text-brand border border-brand/20 w-fit">
-                        <Sparkles className="w-3 h-3" />
-                        {previewBanner.badge}
-                      </span>
+                  <img
+                    src={resolveImageUrl(
+                      previewDevice === 'mobile' && previewBanner.mobileImage
+                        ? previewBanner.mobileImage
+                        : previewBanner.desktopImage
                     )}
-                    <h3 className={`${previewDevice === 'mobile' ? 'text-base font-bold' : 'text-xl sm:text-2xl lg:text-[28px] font-extrabold'} font-heading text-text-main leading-tight line-clamp-2`}>
-                      {previewBanner.title}
-                    </h3>
-                    <p className="text-[11px] sm:text-xs text-text-muted leading-relaxed line-clamp-2 max-w-sm">
-                      {previewBanner.subtitle}
-                    </p>
-                    <div className="pt-1">
-                      <button
-                        type="button"
-                        className="inline-flex items-center gap-1.5 px-3.5 py-1.5 sm:px-4 sm:py-2 rounded-xl bg-brand text-white text-[11px] sm:text-xs font-bold shadow-xs transition"
-                      >
-                        <span>{previewBanner.buttonText || 'Shop Now'}</span>
-                        <ArrowRight className="w-3 h-3" />
-                      </button>
-                    </div>
-                  </div>
-                  <div className={`${previewDevice === 'mobile' ? 'w-[42%]' : 'w-[52%]'} h-full relative bg-surface-subtle overflow-hidden`}>
-                    <img
-                      src={resolveImageUrl(
-                        previewDevice === 'mobile' && previewBanner.mobileImage
-                          ? previewBanner.mobileImage
-                          : previewBanner.desktopImage
-                      )}
-                      alt={previewBanner.title}
-                      className="w-full h-full object-cover object-center pointer-events-none"
-                    />
-                    <div className="absolute inset-y-0 left-0 w-16 md:w-32 bg-gradient-to-r from-surface via-surface/60 to-transparent pointer-events-none" />
-                  </div>
+                    alt={previewBanner.title || 'Promotional Banner'}
+                    className="w-full h-full object-cover object-center pointer-events-none"
+                  />
                 </div>
               </div>
             </div>

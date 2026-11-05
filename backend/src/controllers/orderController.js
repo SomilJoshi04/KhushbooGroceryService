@@ -10,6 +10,7 @@
  * @module controllers/orderController
  */
 
+import mongoose from 'mongoose';
 import { Order } from '../models/Order.js';
 import { Product } from '../models/Product.js';
 import { Coupon } from '../models/Coupon.js';
@@ -382,7 +383,8 @@ export async function getOrderById(req, res, next) {
   try {
     const { id } = req.params;
 
-    const order = await Order.findById(id).lean();
+    const query = mongoose.Types.ObjectId.isValid(id) ? { _id: id } : { orderNumber: id };
+    const order = await Order.findOne(query).lean();
     if (!order) {
       return res.status(404).json({
         success: false,

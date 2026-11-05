@@ -47,6 +47,86 @@ export function AuthProvider({ children }) {
     }
   }, [token]);
 
+  // Synchronize token and user from silent refresh events triggered by Axios interceptor
+  useEffect(() => {
+    const handleTokenRefreshed = (event) => {
+      const newToken = event.detail?.token;
+      const newUser = event.detail?.user;
+      if (newToken) {
+        setToken(newToken);
+      }
+      if (newUser) {
+        setUser(newUser);
+      }
+    };
+
+    const handleSessionExpired = () => {
+      setToken(null);
+      setUser(null);
+    };
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('khushboo:token_refreshed', handleTokenRefreshed);
+      window.addEventListener('khushboo:auth_session_expired', handleSessionExpired);
+    }
+
+    return () => {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('khushboo:token_refreshed', handleTokenRefreshed);
+        window.removeEventListener('khushboo:auth_session_expired', handleSessionExpired);
+      }
+    };
+  }, []);
+
+  // Proactive background refresh timer (schedules silent refresh 2 minutes before access token expiry)
+  useEffect(() => {
+    if (!token) return;
+
+    let refreshTimeout = null;
+
+    try {
+      const base64Url = token.split('.')[1];
+      if (base64Url && typeof window !== 'undefined') {
+        const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+        const jsonPayload = decodeURIComponent(
+          window
+            .atob(base64)
+            .split('')
+            .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+            .join('')
+        );
+        const payload = JSON.parse(jsonPayload);
+
+        if (payload?.exp) {
+          const expMs = payload.exp * 1000;
+          const now = Date.now();
+          const refreshLeadTimeMs = 2 * 60 * 1000;
+          // Trigger 2 minutes before expiry, or after 10s if already nearing expiration
+          const delay = Math.max(expMs - now - refreshLeadTimeMs, 10_000);
+
+          refreshTimeout = setTimeout(async () => {
+            try {
+              const res = await apiClient.post('/auth/refresh');
+              if (res.data?.success && res.data?.token) {
+                setToken(res.data.token);
+                if (res.data.user) setUser(res.data.user);
+              }
+            } catch (err) {
+              // Non-blocking: request-driven 401 interceptor serves as primary fallback
+              console.warn('[auth] Proactive refresh skipped:', err.message);
+            }
+          }, delay);
+        }
+      }
+    } catch {
+      // Non-blocking: rely on request-driven 401 interceptor
+    }
+
+    return () => {
+      if (refreshTimeout) clearTimeout(refreshTimeout);
+    };
+  }, [token]);
+
   // Load current user profile from backend on startup or token refresh
   useEffect(() => {
     async function loadUser() {

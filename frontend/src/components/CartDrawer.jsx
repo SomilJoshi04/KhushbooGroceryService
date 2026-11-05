@@ -29,6 +29,7 @@ import {
   AlertCircle,
   Trash2,
   ChevronRight,
+  Volume2,
 } from 'lucide-react';
 import { useCart } from '../context/CartContext.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
@@ -36,6 +37,7 @@ import { useStoreSettings } from '../context/StoreSettingsContext.jsx';
 import { resolveImageUrl, getApiUploadUrl, NEUTRAL_PRODUCT_PLACEHOLDER } from '../config/api.js';
 import { apiClient } from '../config/api.js';
 import { ImageWithSkeleton } from './skeleton/index.js';
+import { useOrderSuccessSound } from '../hooks/useOrderSuccessSound.js';
 
 export function CartDrawer({ onOpenAuth }) {
   const {
@@ -79,12 +81,19 @@ export function CartDrawer({ onOpenAuth }) {
 
   // Order Confirmation State
   const [orderConfirmed, setOrderConfirmed] = useState(false);
+  const [confirmedOrder, setConfirmedOrder] = useState(null);
   const [confirmedOrderNumber, setConfirmedOrderNumber] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [checkoutError, setCheckoutError] = useState('');
   const [isPincodeServiceable, setIsPincodeServiceable] = useState(true);
   const [pincodeReason, setPincodeReason] = useState('');
   const [quickCategories, setQuickCategories] = useState([]);
+
+  // Integrate order success confirmation sound
+  const { autoplayBlocked, playManual } = useOrderSuccessSound(
+    orderConfirmed ? confirmedOrder || confirmedOrderNumber : null,
+    { enabled: orderConfirmed }
+  );
 
   useEffect(() => {
     if (isCartOpen && cart.length === 0) {
@@ -306,6 +315,7 @@ export function CartDrawer({ onOpenAuth }) {
       const res = await apiClient.post('/v1/orders', orderPayload);
 
       if (res.data?.success && res.data?.order) {
+        setConfirmedOrder(res.data.order);
         setConfirmedOrderNumber(res.data.order.orderNumber);
         setOrderConfirmed(true);
         clearCart();
@@ -387,9 +397,24 @@ export function CartDrawer({ onOpenAuth }) {
               Order Placed Successfully
             </span>
             <h3 className="text-xl font-bold font-heading text-text-main mb-1">Thank you!</h3>
-            <p className="text-xs text-text-muted max-w-xs mb-5">
+            <p className="text-xs text-text-muted max-w-xs mb-4">
               Your grocery order <span className="text-brand font-mono font-bold">#{confirmedOrderNumber}</span> is confirmed for delivery in Indore.
             </p>
+
+            {/* Subtle Fallback Button if browser autoplay was restricted */}
+            {autoplayBlocked && (
+              <div className="mb-4 animate-fadeIn">
+                <button
+                  type="button"
+                  onClick={playManual}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-surface hover:bg-surface-subtle border border-border-neutral text-[11px] font-bold text-brand shadow-2xs transition active:scale-98 focus:outline-none focus:ring-2 focus:ring-brand"
+                  aria-label="Play order confirmation sound"
+                >
+                  <Volume2 className="w-3.5 h-3.5 text-brand animate-pulse" />
+                  <span>🔊 Play confirmation sound</span>
+                </button>
+              </div>
+            )}
 
             <div className="bg-surface-subtle p-4 rounded-xl border border-border-neutral text-left w-full mb-5 text-xs space-y-2">
               <div className="flex justify-between text-text-main">
@@ -412,6 +437,7 @@ export function CartDrawer({ onOpenAuth }) {
               <button
                 onClick={() => {
                   setOrderConfirmed(false);
+                  setConfirmedOrder(null);
                   setIsCartOpen(false);
                   navigate('/account/orders');
                 }}
@@ -423,6 +449,7 @@ export function CartDrawer({ onOpenAuth }) {
               <button
                 onClick={() => {
                   setOrderConfirmed(false);
+                  setConfirmedOrder(null);
                   setIsCartOpen(false);
                 }}
                 className="w-full py-2 bg-surface hover:bg-surface-subtle border border-border-neutral text-text-main font-semibold text-xs rounded-xl transition"

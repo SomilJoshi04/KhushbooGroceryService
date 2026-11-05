@@ -43,7 +43,7 @@ export async function getPublicBanners(req, res, next) {
     };
 
     const banners = await Banner.find(query)
-      .select('title subtitle badge desktopImage mobileImage buttonText buttonLink targetType targetId priority')
+      .select('title subtitle badge desktopImage mobileImage buttonText buttonLink showTextOverlay targetType targetId priority')
       .sort({ priority: -1, createdAt: -1 })
       .lean();
 
