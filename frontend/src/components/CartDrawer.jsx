@@ -38,6 +38,7 @@ import { resolveImageUrl, getApiUploadUrl, NEUTRAL_PRODUCT_PLACEHOLDER } from '.
 import { apiClient } from '../config/api.js';
 import { ImageWithSkeleton } from './skeleton/index.js';
 import { useOrderSuccessSound } from '../hooks/useOrderSuccessSound.js';
+import { useBodyScrollLock } from '../hooks/useBodyScrollLock.js';
 
 export function CartDrawer({ onOpenAuth }) {
   const {
@@ -118,7 +119,10 @@ export function CartDrawer({ onOpenAuth }) {
     { code: 'FRESH10', label: '10% OFF' },
   ];
 
-  // Lock background body scroll and listen for Escape key when drawer is open
+  // Lock background body scroll across mobile and desktop when drawer is open
+  useBodyScrollLock(isCartOpen);
+
+  // Listen for Escape key when drawer is open
   useEffect(() => {
     if (!isCartOpen) return;
 
@@ -129,12 +133,9 @@ export function CartDrawer({ onOpenAuth }) {
     };
 
     window.addEventListener('keydown', handleKeyDown);
-    const originalOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
 
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
-      document.body.style.overflow = originalOverflow;
     };
   }, [isCartOpen, setIsCartOpen]);
 
@@ -341,8 +342,9 @@ export function CartDrawer({ onOpenAuth }) {
     <div className="fixed inset-0 z-50 overflow-hidden animate-fadeIn">
       {/* Subtle Backdrop with click to close */}
       <div
-        className="fixed inset-0 bg-black/40 backdrop-blur-xs transition-opacity duration-300"
+        className="fixed inset-0 bg-black/40 backdrop-blur-xs transition-opacity duration-300 touch-none"
         onClick={() => setIsCartOpen(false)}
+        onTouchMove={(e) => e.preventDefault()}
         aria-hidden="true"
       />
 
@@ -352,7 +354,7 @@ export function CartDrawer({ onOpenAuth }) {
         aria-modal="true"
         aria-label="Shopping Cart"
         onClick={(e) => e.stopPropagation()}
-        className="fixed top-0 right-0 bottom-0 z-50 w-full sm:w-[440px] md:w-[460px] max-w-full h-full h-dvh bg-surface border-l border-border-neutral flex flex-col shadow-2xl text-text-main"
+        className="fixed top-0 right-0 bottom-0 z-50 w-full sm:w-[440px] md:w-[460px] max-w-full h-full h-dvh bg-surface border-l border-border-neutral flex flex-col shadow-2xl text-text-main overscroll-contain"
       >
         {/* Header (Sticky Top) */}
         <div className="px-5 py-4 border-b border-border-neutral bg-surface-subtle flex items-center justify-between shrink-0">

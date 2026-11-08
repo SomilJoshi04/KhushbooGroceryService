@@ -18,6 +18,7 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import {
   X,
   Plus,
@@ -31,6 +32,7 @@ import {
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useCart, getCartItemKey } from '../context/CartContext.jsx';
+import { useBodyScrollLock } from '../hooks/useBodyScrollLock.js';
 import { ImageWithSkeleton } from './skeleton/index.js';
 
 export function ProductDetailModal({ product, isOpen, onClose }) {
@@ -49,7 +51,10 @@ export function ProductDetailModal({ product, isOpen, onClose }) {
   const [addedToast, setAddedToast] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Close on Escape key & lock body scroll while modal is open
+  // Lock background scroll across desktop and mobile devices while modal is open
+  useBodyScrollLock(isOpen);
+
+  // Close on Escape key
   useEffect(() => {
     if (!isOpen) return;
 
@@ -58,12 +63,9 @@ export function ProductDetailModal({ product, isOpen, onClose }) {
     };
 
     window.addEventListener('keydown', handleKeyDown);
-    const originalOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
 
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
-      document.body.style.overflow = originalOverflow;
     };
   }, [isOpen, onClose]);
 
@@ -147,10 +149,15 @@ export function ProductDetailModal({ product, isOpen, onClose }) {
     updateQty(itemKey, -1);
   };
 
-  return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/40 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+  return createPortal(
+    <div className="fixed inset-0 z-50 overflow-y-auto overscroll-contain bg-black/40 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 animate-fadeIn">
       {/* Backdrop */}
-      <div className="fixed inset-0" onClick={onClose} aria-hidden="true" />
+      <div
+        className="fixed inset-0 touch-none"
+        onClick={onClose}
+        onTouchMove={(e) => e.preventDefault()}
+        aria-hidden="true"
+      />
 
       {/* Modal Card */}
       <div
@@ -158,7 +165,7 @@ export function ProductDetailModal({ product, isOpen, onClose }) {
         aria-modal="true"
         aria-label={product.name}
         onClick={(e) => e.stopPropagation()}
-        className="relative bg-surface border border-border-neutral rounded-2xl max-w-2xl w-full shadow-2xl z-10 animate-scaleUp overflow-hidden max-h-[90dvh] flex flex-col text-text-main"
+        className="relative bg-surface border border-border-neutral rounded-2xl max-w-2xl w-full shadow-2xl z-10 animate-scaleUp overflow-hidden max-h-[90dvh] flex flex-col text-text-main overscroll-contain"
       >
         {/* Close Button */}
         <button
@@ -170,7 +177,7 @@ export function ProductDetailModal({ product, isOpen, onClose }) {
         </button>
 
         {/* Scrollable Modal Body (Contains Image + Details) */}
-        <div className="overflow-y-auto flex-1 p-4 sm:p-6 flex flex-col md:flex-row gap-4 md:gap-6">
+        <div className="overflow-y-auto overscroll-contain flex-1 p-4 sm:p-6 flex flex-col md:flex-row gap-4 md:gap-6">
           {/* Product Image Column */}
           <div className="w-full md:w-5/12 flex flex-col items-center shrink-0">
             <div className="relative w-full max-h-52 sm:max-h-64 md:max-h-none aspect-square bg-surface-subtle border border-border-neutral rounded-xl overflow-hidden flex items-center justify-center">
@@ -426,6 +433,7 @@ export function ProductDetailModal({ product, isOpen, onClose }) {
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
