@@ -88,6 +88,7 @@ export function CartDrawer({ onOpenAuth }) {
   const [checkoutError, setCheckoutError] = useState('');
   const [isPincodeServiceable, setIsPincodeServiceable] = useState(true);
   const [pincodeReason, setPincodeReason] = useState('');
+  const [deliveryQuote, setDeliveryQuote] = useState(null);
   const [quickCategories, setQuickCategories] = useState([]);
 
   // Integrate order success confirmation sound
@@ -179,7 +180,11 @@ export function CartDrawer({ onOpenAuth }) {
   );
 
   const couponDiscountPaise = appliedCoupon?.discountPaise || 0;
-  const finalPayablePaise = Math.max(0, grandTotalPaise - couponDiscountPaise);
+  const effectiveDeliveryFeePaise = deliveryQuote?.deliveryFeePaise !== undefined
+    ? (isFreeDelivery ? 0 : deliveryQuote.deliveryFeePaise)
+    : deliveryFeePaise;
+  const effectiveGrandTotalPaise = cartSubtotalPaise + effectiveDeliveryFeePaise;
+  const finalPayablePaise = Math.max(0, effectiveGrandTotalPaise - couponDiscountPaise);
 
   const handlePincodeChange = async (newPincode) => {
     setPincode(newPincode);
@@ -192,6 +197,7 @@ export function CartDrawer({ onOpenAuth }) {
         });
         setIsPincodeServiceable(res.data.isServiceable);
         setPincodeReason(res.data.reason || '');
+        setDeliveryQuote(res.data);
         const zoneData = res.data.zone
           ? {
               ...res.data.zone,
@@ -202,6 +208,7 @@ export function CartDrawer({ onOpenAuth }) {
       } catch {
         setIsPincodeServiceable(false);
         setPincodeReason('Unable to verify delivery for this PIN code');
+        setDeliveryQuote(null);
       }
     }
   };
@@ -228,6 +235,12 @@ export function CartDrawer({ onOpenAuth }) {
       const res = await apiClient.post('/v1/store/coupons/validate', {
         code,
         subtotalPaise: cartSubtotalPaise,
+        items: cart.map((i) => ({
+          productId: i.productId,
+          sku: i.variantSku,
+          quantity: i.qty,
+          pricePaise: i.pricePaise,
+        })),
       });
 
       if (res.data?.success && res.data?.valid) {
@@ -242,6 +255,16 @@ export function CartDrawer({ onOpenAuth }) {
       setCouponLoading(false);
     }
   };
+
+  // Auto-revalidate applied coupon if cart items change
+  const appliedCouponCode = appliedCoupon?.code;
+  useEffect(() => {
+    if (appliedCouponCode && cart.length > 0) {
+      handleApplyCoupon(appliedCouponCode);
+    } else if (cart.length === 0 && appliedCouponCode) {
+      setAppliedCoupon(null);
+    }
+  }, [cartSubtotalPaise, cart.length, appliedCouponCode]);
 
   const handleRemoveCoupon = () => {
     setAppliedCoupon(null);
@@ -643,17 +666,24 @@ export function CartDrawer({ onOpenAuth }) {
               {/* Promo Coupon Bar */}
               <div className="bg-surface-subtle p-2 rounded-xl border border-border-neutral text-xs">
                 {appliedCoupon ? (
-                  <div className="flex items-center justify-between text-brand text-[11px] font-semibold">
-                    <span className="flex items-center gap-1 font-mono">
-                      <Tag className="w-3 h-3" /> {appliedCoupon.code} applied (-₹{(appliedCoupon.discountPaise / 100).toFixed(0)})
-                    </span>
-                    <button
-                      type="button"
-                      onClick={handleRemoveCoupon}
-                      className="text-text-muted hover:text-status-error font-bold ml-2"
-                    >
-                      Remove
-                    </button>
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between text-brand text-[11px] font-semibold">
+                      <span className="flex items-center gap-1 font-mono">
+                        <Tag className="w-3 h-3" /> {appliedCoupon.code} applied (-₹{(appliedCoupon.discountPaise / 100).toFixed(0)})
+                      </span>
+                      <button
+                        type="button"
+                        onClick={handleRemoveCoupon}
+                        className="text-text-muted hover:text-status-error font-bold ml-2"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                    {appliedCoupon.applicabilityType && appliedCoupon.applicabilityType !== 'ALL_PRODUCTS' && (
+                      <p className="text-[10px] text-brand/80">
+                        Applied on eligible {appliedCoupon.applicabilityType === 'CATEGORIES' ? 'categories' : 'products'} (₹{((appliedCoupon.eligibleSubtotalPaise || 0) / 100).toFixed(0)})
+                      </p>
+                    )}
                   </div>
                 ) : (
                   <div className="flex items-center gap-1.5">
@@ -796,10 +826,18 @@ export function CartDrawer({ onOpenAuth }) {
                 )}
                 <div className="flex justify-between text-text-muted text-[11px]">
                   <span>Delivery Fee:</span>
-                  <span className={isFreeDelivery ? 'text-status-success font-bold' : 'text-text-main'}>
-                    {isFreeDelivery ? 'FREE' : `₹${(deliveryFeePaise / 100).toFixed(0)}`}
+                  <span className={isFreeDelivery ? 'text-status-success font-bold' : 'text-text-main font-mono'}>
+                    {isFreeDelivery ? 'FREE' : `₹${(effectiveDeliveryFeePaise / 100).toFixed(0)}`}
                   </span>
                 </div>
+                {deliveryQuote?.distanceKm > 0 && deliveryQuote?.pricingSnapshot?.pricingMode === 'DISTANCE_BASED' && (
+                  <div className="flex justify-between text-text-muted text-[10px]">
+                    <span>Distance ({deliveryQuote.distanceKm} km):</span>
+                    <span className="font-mono text-brand font-medium">
+                      {deliveryQuote.pricingSnapshot?.matchedSlabLabel || `${deliveryQuote.distanceKm} km`}
+                    </span>
+                  </div>
+                )}
                 <div className="pt-1.5 border-t border-border-neutral flex justify-between text-sm font-bold text-text-main">
                   <span>To Pay:</span>
                   <span className="text-brand font-extrabold font-mono text-base">

@@ -17,6 +17,11 @@ import { Coupon } from '../models/Coupon.js';
 import { StoreSetting } from '../models/StoreSetting.js';
 import { calculateDeliveryPricing, getEffectiveMinOrderAmountPaise } from '../services/deliveryService.js';
 import { deductStockForOrder, restoreStockForOrder } from '../services/inventoryService.js';
+import {
+  validateAndCalculateCouponDiscount,
+  claimCouponUsageAtomic,
+  releaseCouponUsageAtomic,
+} from '../services/couponService.js';
 import { AuditLog } from '../models/AuditLog.js';
 import { createNotification } from '../services/notificationService.js';
 import { env } from '../config/env.js';
@@ -186,15 +191,26 @@ export async function createOrder(req, res, next) {
     const deliveryFeePaise = deliveryCalc.deliveryFeePaise;
     let discountPaise = 0;
     let appliedCouponDoc = null;
+    let couponCalcResult = null;
 
-    if (couponCode && typeof couponCode === 'string') {
-      appliedCouponDoc = await Coupon.findOne({ code: couponCode.toUpperCase().trim() });
-      if (appliedCouponDoc) {
-        const check = appliedCouponDoc.isValidForCart(itemsSubtotalPaise);
-        if (check.valid) {
-          discountPaise = check.discountPaise;
-        }
+    if (couponCode && typeof couponCode === 'string' && couponCode.trim()) {
+      couponCalcResult = await validateAndCalculateCouponDiscount({
+        couponCode,
+        items,
+        subtotalPaise: itemsSubtotalPaise,
+      });
+
+      if (!couponCalcResult.valid) {
+        return res.status(400).json({
+          success: false,
+          requestId: req.id,
+          code: couponCalcResult.code,
+          message: couponCalcResult.message,
+        });
       }
+
+      appliedCouponDoc = couponCalcResult.couponDoc;
+      discountPaise = couponCalcResult.discountPaise;
     }
 
     const grandTotalPaise = Math.max(0, itemsSubtotalPaise + deliveryFeePaise - discountPaise);
@@ -220,10 +236,21 @@ export async function createOrder(req, res, next) {
         zoneCode: deliveryCalc.zone?.code || '',
         zoneName: deliveryCalc.zone?.name || '',
         distanceKm: deliveryCalc.distanceKm,
-        matchedSlabLabel: `${deliveryCalc.distanceKm} km (${deliveryCalc.zone?.name || 'Indore'})`,
+        matchedSlabLabel: deliveryCalc.matchedSlabLabel || `${deliveryCalc.distanceKm} km (${deliveryCalc.zone?.name || 'Indore'})`,
         isFreeDelivery: deliveryCalc.isFreeDelivery,
         estimatedDeliveryWindow: deliveryCalc.estimatedDeliveryWindow || '90 - 120 Minutes',
+        pricingMode: deliveryCalc.pricingMode || 'STANDARD',
+        appliedDistanceRule: deliveryCalc.appliedDistanceRule || undefined,
       },
+      couponSnapshot: couponCalcResult && couponCalcResult.valid ? {
+        code: couponCalcResult.code,
+        couponId: couponCalcResult.couponId,
+        discountType: couponCalcResult.discountType,
+        discountValue: couponCalcResult.discountValue,
+        discountPaise: couponCalcResult.discountPaise,
+        eligibleSubtotalPaise: couponCalcResult.eligibleSubtotalPaise,
+        applicabilityType: couponCalcResult.applicabilityType,
+      } : undefined,
       payment: {
         method: paymentMethod || 'COD',
         status: 'PENDING',
@@ -256,7 +283,17 @@ export async function createOrder(req, res, next) {
     await order.save();
 
     if (appliedCouponDoc) {
-      await Coupon.findByIdAndUpdate(appliedCouponDoc._id, { $inc: { usedCount: 1 } });
+      const claimed = await claimCouponUsageAtomic(appliedCouponDoc._id);
+      if (!claimed) {
+        await Order.findByIdAndDelete(order._id);
+        await restoreStockForOrder(items, order._id.toString(), userId.toString());
+        return res.status(409).json({
+          success: false,
+          requestId: req.id,
+          code: 'COUPON_LIMIT_REACHED',
+          message: 'This coupon reached its maximum usage limit during checkout. Please try again without this coupon.',
+        });
+      }
     }
 
     // Real-Time Notification: Notify administrators of newly placed order
@@ -478,6 +515,10 @@ export async function cancelOrder(req, res, next) {
     });
 
     await order.save();
+
+    if (order.couponSnapshot?.couponId) {
+      await releaseCouponUsageAtomic(order.couponSnapshot.couponId);
+    }
 
     await AuditLog.create({
       action: 'ORDER_CANCELLED',

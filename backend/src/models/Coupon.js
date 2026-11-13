@@ -67,11 +67,33 @@ const couponSchema = new mongoose.Schema(
       default: true,
       index: true,
     },
+    // Applicability scope: ALL_PRODUCTS (entire store), CATEGORIES, or PRODUCTS
+    applicability: {
+      type: {
+        type: String,
+        enum: ['ALL_PRODUCTS', 'CATEGORIES', 'PRODUCTS'],
+        default: 'ALL_PRODUCTS',
+      },
+      categoryIds: [
+        {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: 'Category',
+        },
+      ],
+      productIds: [
+        {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: 'Product',
+        },
+      ],
+    },
   },
   {
     timestamps: true,
   }
 );
+
+couponSchema.index({ 'applicability.type': 1 });
 
 couponSchema.methods.isValidForCart = function (subtotalPaise) {
   if (!this.isActive) return { valid: false, reason: 'This coupon is no longer active.' };

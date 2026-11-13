@@ -49,29 +49,34 @@ export function RegisterPage() {
     }
   }, [isAuthenticated, navigate]);
 
-  // Dynamic Password Validation Rules
+  // Dynamic Password Validation Rules (Simplified: minimum 6 characters)
   const passwordCriteria = useMemo(() => {
     return {
-      length: password.length >= 12,
-      uppercase: /[A-Z]/.test(password),
-      lowercase: /[a-z]/.test(password),
-      number: /[0-9]/.test(password),
-      special: /[^A-Za-z0-9]/.test(password),
+      length: password.length >= 6,
+      hasLetter: /[a-zA-Z]/.test(password),
+      hasNumber: /[0-9]/.test(password),
+      hasSpecial: /[^a-zA-Z0-9]/.test(password),
     };
   }, [password]);
 
   const strengthScore = useMemo(() => {
-    const passedCount = Object.values(passwordCriteria).filter(Boolean).length;
-    return passedCount; // 0 to 5
-  }, [passwordCriteria]);
+    if (!password) return 0;
+    if (password.length < 6) return 1;
+    let score = 2; // base score for 6+ characters
+    if (passwordCriteria.hasLetter && passwordCriteria.hasNumber) score += 1;
+    if (passwordCriteria.hasSpecial) score += 1;
+    if (password.length >= 10) score += 1;
+    return Math.min(score, 5);
+  }, [password, passwordCriteria]);
 
   const strengthLabel = useMemo(() => {
-    if (strengthScore <= 1) return { label: 'Very Weak', color: 'bg-red-500', text: 'text-red-500' };
-    if (strengthScore === 2) return { label: 'Weak', color: 'bg-orange-500', text: 'text-orange-500' };
-    if (strengthScore === 3) return { label: 'Medium', color: 'bg-yellow-500', text: 'text-yellow-600' };
+    if (!password) return { label: '', color: 'bg-gray-200', text: 'text-text-muted' };
+    if (password.length < 6) return { label: 'Too short (min 6 chars)', color: 'bg-red-500', text: 'text-red-500' };
+    if (strengthScore <= 2) return { label: 'Fair', color: 'bg-orange-500', text: 'text-orange-500' };
+    if (strengthScore === 3) return { label: 'Good', color: 'bg-yellow-500', text: 'text-yellow-600' };
     if (strengthScore === 4) return { label: 'Strong', color: 'bg-emerald-500', text: 'text-emerald-600' };
     return { label: 'Excellent', color: 'bg-brand', text: 'text-brand' };
-  }, [strengthScore]);
+  }, [password, strengthScore]);
 
   const passwordsMatch = password && confirmPassword && password === confirmPassword;
 
@@ -79,13 +84,8 @@ export function RegisterPage() {
     e.preventDefault();
     setError('');
 
-    if (password.length < 12) {
-      setError('Password must contain at least 12 characters.');
-      return;
-    }
-
-    if (strengthScore < 4) {
-      setError('Password must include uppercase, lowercase, numbers, and special characters.');
+    if (password.length < 6) {
+      setError('Password must contain at least 6 characters.');
       return;
     }
 
@@ -102,7 +102,7 @@ export function RegisterPage() {
     setLoading(true);
 
     try {
-      const regRes = await register({
+      await register({
         fullName: fullName.trim(),
         email: email.trim().toLowerCase(),
         password,
@@ -110,18 +110,8 @@ export function RegisterPage() {
         acceptTerms: Boolean(acceptTerms),
       });
 
-      // If account is already verified (e.g. SMTP unconfigured), proceed directly to login
-      if (regRes?.isEmailVerified) {
-        navigate('/login', {
-          replace: true,
-          state: { successMsg: 'Account created successfully! You can now sign in.' },
-        });
-      } else {
-        // Redirect to verification pending screen
-        navigate(`/verify-email-pending?email=${encodeURIComponent(email.trim().toLowerCase())}`, {
-          replace: true,
-        });
-      }
+      // Auto-login successful: redirect straight to home page
+      navigate('/', { replace: true });
     } catch (err) {
       setError(err.message || 'Failed to create account. Please check your information.');
     } finally {
@@ -195,7 +185,7 @@ export function RegisterPage() {
               />
             </div>
             <p className="text-[11px] text-text-muted mt-1">
-              We'll send an activation link to verify this email address.
+              Quick registration — you will be logged in automatically.
             </p>
           </div>
 
@@ -210,7 +200,7 @@ export function RegisterPage() {
                 type={showPassword ? 'text' : 'password'}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••••••"
+                placeholder="Min 6 characters (letters, numbers, symbols)"
                 required
                 autoComplete="new-password"
                 className="w-full pl-10 pr-10 py-2.5 text-sm bg-surface-subtle border border-border-neutral rounded-xl text-text-main focus:outline-none focus:border-brand focus:ring-1 focus:ring-brand transition placeholder:text-text-muted shadow-2xs"
@@ -245,27 +235,23 @@ export function RegisterPage() {
                   ))}
                 </div>
 
-                {/* Criteria checklist */}
-                <div className="grid grid-cols-2 gap-1 text-[11px] text-text-muted pt-1">
-                  <div className={`flex items-center gap-1.5 ${passwordCriteria.length ? 'text-brand' : ''}`}>
-                    {passwordCriteria.length ? <Check className="w-3.5 h-3.5 shrink-0" /> : <X className="w-3.5 h-3.5 shrink-0 opacity-40" />}
-                    <span>12+ characters</span>
+                {/* Friendly Criteria indicators */}
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px] text-text-muted pt-1">
+                  <div className={`flex items-center gap-1.5 ${passwordCriteria.length ? 'text-brand font-medium' : ''}`}>
+                    {passwordCriteria.length ? <Check className="w-3.5 h-3.5 shrink-0 text-brand" /> : <X className="w-3.5 h-3.5 shrink-0 opacity-40" />}
+                    <span>At least 6 characters (Required)</span>
                   </div>
-                  <div className={`flex items-center gap-1.5 ${passwordCriteria.uppercase ? 'text-brand' : ''}`}>
-                    {passwordCriteria.uppercase ? <Check className="w-3.5 h-3.5 shrink-0" /> : <X className="w-3.5 h-3.5 shrink-0 opacity-40" />}
-                    <span>Uppercase letter</span>
+                  <div className={`flex items-center gap-1.5 ${passwordCriteria.hasLetter ? 'text-brand' : ''}`}>
+                    {passwordCriteria.hasLetter ? <Check className="w-3.5 h-3.5 shrink-0 text-brand" /> : <span className="w-1.5 h-1.5 rounded-full bg-border-neutral shrink-0" />}
+                    <span>Letters (A-Z, a-z)</span>
                   </div>
-                  <div className={`flex items-center gap-1.5 ${passwordCriteria.lowercase ? 'text-brand' : ''}`}>
-                    {passwordCriteria.lowercase ? <Check className="w-3.5 h-3.5 shrink-0" /> : <X className="w-3.5 h-3.5 shrink-0 opacity-40" />}
-                    <span>Lowercase letter</span>
+                  <div className={`flex items-center gap-1.5 ${passwordCriteria.hasNumber ? 'text-brand' : ''}`}>
+                    {passwordCriteria.hasNumber ? <Check className="w-3.5 h-3.5 shrink-0 text-brand" /> : <span className="w-1.5 h-1.5 rounded-full bg-border-neutral shrink-0" />}
+                    <span>Numbers (0-9)</span>
                   </div>
-                  <div className={`flex items-center gap-1.5 ${passwordCriteria.number ? 'text-brand' : ''}`}>
-                    {passwordCriteria.number ? <Check className="w-3.5 h-3.5 shrink-0" /> : <X className="w-3.5 h-3.5 shrink-0 opacity-40" />}
-                    <span>Number</span>
-                  </div>
-                  <div className={`flex items-center gap-1.5 ${passwordCriteria.special ? 'text-brand' : ''}`}>
-                    {passwordCriteria.special ? <Check className="w-3.5 h-3.5 shrink-0" /> : <X className="w-3.5 h-3.5 shrink-0 opacity-40" />}
-                    <span>Special character</span>
+                  <div className={`flex items-center gap-1.5 ${passwordCriteria.hasSpecial ? 'text-brand' : ''}`}>
+                    {passwordCriteria.hasSpecial ? <Check className="w-3.5 h-3.5 shrink-0 text-brand" /> : <span className="w-1.5 h-1.5 rounded-full bg-border-neutral shrink-0" />}
+                    <span>Special characters (!@#$)</span>
                   </div>
                 </div>
               </div>
@@ -346,7 +332,7 @@ export function RegisterPage() {
               loading ||
               !fullName.trim() ||
               !email.trim() ||
-              strengthScore < 4 ||
+              password.length < 6 ||
               !passwordsMatch ||
               !acceptTerms
             }

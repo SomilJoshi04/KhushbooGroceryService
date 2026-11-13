@@ -23,8 +23,8 @@ export const deliveryAddressInputSchema = z.object({
   pincode: z.string().trim().regex(/^[1-9][0-9]{5}$/, 'Invalid 6-digit Indian PIN code'),
   coordinates: z
     .object({
-      lat: z.number().min(-90).max(90),
-      lng: z.number().min(-180).max(180),
+      lat: z.number().finite('Latitude must be a finite number').min(-90).max(90),
+      lng: z.number().finite('Longitude must be a finite number').min(-180).max(180),
     })
     .optional(),
 }).strict();

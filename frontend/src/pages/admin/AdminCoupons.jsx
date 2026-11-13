@@ -54,6 +54,13 @@ export function AdminCoupons() {
   const [bulkResultSummary, setBulkResultSummary] = useState(null);
   const [bulkLoading, setBulkLoading] = useState(false);
 
+  // Applicability Selection State
+  const [categories, setCategories] = useState([]);
+  const [products, setProducts] = useState([]);
+  const [categorySearch, setCategorySearch] = useState('');
+  const [productSearch, setProductSearch] = useState('');
+  const [searchingProducts, setSearchingProducts] = useState(false);
+
   // Form Fields
   const [form, setForm] = useState({
     code: '',
@@ -65,7 +72,48 @@ export function AdminCoupons() {
     usageLimit: 100,
     description: '',
     isActive: true,
+    applicabilityType: 'ALL_PRODUCTS', // 'ALL_PRODUCTS' | 'CATEGORIES' | 'PRODUCTS'
+    selectedCategoryIds: [],
+    selectedProductIds: [],
   });
+
+  // Load available categories
+  useEffect(() => {
+    apiClient
+      .get('/v1/categories')
+      .then((res) => {
+        if (res.data?.success) {
+          setCategories(res.data.data || []);
+        }
+      })
+      .catch((err) => console.error('Failed to load categories for coupons:', err));
+  }, []);
+
+  // Fetch products for product-level scoping
+  const fetchProducts = async (query = '') => {
+    setSearchingProducts(true);
+    try {
+      const res = await apiClient.get('/v1/admin/products', {
+        params: { search: query, limit: 50 },
+      });
+      if (res.data?.success) {
+        setProducts(res.data.data || []);
+      }
+    } catch (err) {
+      console.error('Failed to load products for coupons:', err);
+    } finally {
+      setSearchingProducts(false);
+    }
+  };
+
+  // Debounced product search when modal is in PRODUCTS mode
+  useEffect(() => {
+    if (!isModalOpen || form.applicabilityType !== 'PRODUCTS') return;
+    const timer = setTimeout(() => {
+      fetchProducts(productSearch);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [productSearch, isModalOpen, form.applicabilityType]);
 
   const fetchCoupons = async () => {
     setLoading(true);
@@ -189,32 +237,67 @@ export function AdminCoupons() {
       usageLimit: 100,
       description: '',
       isActive: true,
+      applicabilityType: 'ALL_PRODUCTS',
+      selectedCategoryIds: [],
+      selectedProductIds: [],
     });
+    setCategorySearch('');
+    setProductSearch('');
     setFormError('');
     setIsModalOpen(true);
   };
 
   const openEditModal = (coupon) => {
     setEditingCoupon(coupon);
+    const app = coupon.applicability || {};
+    const catIds = Array.isArray(app.categoryIds)
+      ? app.categoryIds.map((c) => (typeof c === 'object' && c?._id ? c._id.toString() : c.toString()))
+      : [];
+    const prodIds = Array.isArray(app.productIds)
+      ? app.productIds.map((p) => (typeof p === 'object' && p?._id ? p._id.toString() : p.toString()))
+      : [];
+
     setForm({
       code: coupon.code,
       discountType: coupon.discountType,
       discountValue: coupon.discountType === 'FLAT' ? coupon.discountValue / 100 : coupon.discountValue,
       minOrderAmountRupees: coupon.minOrderAmountPaise ? coupon.minOrderAmountPaise / 100 : 0,
       maxDiscountAmountRupees: coupon.maxDiscountAmountPaise ? coupon.maxDiscountAmountPaise / 100 : 0,
-      validTill: coupon.validTill ? new Date(coupon.validTill).toISOString().split('T')[0] : '',
+      validTill: coupon.validTill
+        ? new Date(coupon.validTill).toISOString().split('T')[0]
+        : coupon.expiresAt
+        ? new Date(coupon.expiresAt).toISOString().split('T')[0]
+        : '',
       usageLimit: coupon.usageLimit || 0,
       description: coupon.description || '',
       isActive: coupon.isActive,
+      applicabilityType: app.type || 'ALL_PRODUCTS',
+      selectedCategoryIds: catIds,
+      selectedProductIds: prodIds,
     });
+    setCategorySearch('');
+    setProductSearch('');
     setFormError('');
     setIsModalOpen(true);
+    if (app.type === 'PRODUCTS') {
+      fetchProducts('');
+    }
   };
 
   const handleSaveCoupon = async (e) => {
     e.preventDefault();
     if (!form.code.trim()) {
       setFormError('Coupon code is required.');
+      return;
+    }
+
+    if (form.applicabilityType === 'CATEGORIES' && form.selectedCategoryIds.length === 0) {
+      setFormError('Please select at least one category for this category-scoped coupon.');
+      return;
+    }
+
+    if (form.applicabilityType === 'PRODUCTS' && form.selectedProductIds.length === 0) {
+      setFormError('Please select at least one product for this product-scoped coupon.');
       return;
     }
 
@@ -228,10 +311,16 @@ export function AdminCoupons() {
         discountValue: Number(form.discountValue),
         minOrderAmountPaise: Math.round(Number(form.minOrderAmountRupees || 0) * 100),
         maxDiscountAmountPaise: Math.round(Number(form.maxDiscountAmountRupees || 0) * 100),
+        expiresAt: form.validTill ? new Date(form.validTill).toISOString() : new Date(Date.now() + 30 * 86400000).toISOString(),
         validTill: form.validTill ? new Date(form.validTill).toISOString() : null,
         usageLimit: Number(form.usageLimit) || null,
         description: form.description.trim(),
         isActive: form.isActive,
+        applicability: {
+          type: form.applicabilityType,
+          categoryIds: form.applicabilityType === 'CATEGORIES' ? form.selectedCategoryIds : [],
+          productIds: form.applicabilityType === 'PRODUCTS' ? form.selectedProductIds : [],
+        },
       };
 
       if (form.discountType === 'FLAT') {
@@ -382,10 +471,31 @@ export function AdminCoupons() {
                         />
                       </td>
                       <td className="px-5 py-4">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-mono font-bold text-brand bg-brand-light border border-brand/20 px-2 py-0.5 rounded-md text-xs">
                             {c.code}
                           </span>
+                          {(!c.applicability || c.applicability?.type === 'ALL_PRODUCTS') && (
+                            <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                              Entire Store
+                            </span>
+                          )}
+                          {c.applicability?.type === 'CATEGORIES' && (
+                            <span
+                              className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200"
+                              title={(c.applicability.categoryIds || []).map((cat) => (typeof cat === 'object' ? cat.name : cat)).join(', ')}
+                            >
+                              {c.applicability.categoryIds?.length || 0} Categories
+                            </span>
+                          )}
+                          {c.applicability?.type === 'PRODUCTS' && (
+                            <span
+                              className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200"
+                              title={(c.applicability.productIds || []).map((p) => (typeof p === 'object' ? p.name : p)).join(', ')}
+                            >
+                              {c.applicability.productIds?.length || 0} Products
+                            </span>
+                          )}
                         </div>
                         {c.description && (
                           <p className="text-[11px] text-text-muted mt-1 max-w-xs truncate">
@@ -500,7 +610,7 @@ export function AdminCoupons() {
       {/* Create / Edit Modal */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 overflow-y-auto bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-surface border border-border-neutral rounded-2xl max-w-md w-full p-6 shadow-xl relative animate-fadeIn text-text-main">
+          <div className="bg-surface border border-border-neutral rounded-2xl max-w-xl w-full p-6 shadow-xl relative animate-fadeIn text-text-main max-h-[92vh] overflow-y-auto">
             <button
               onClick={() => setIsModalOpen(false)}
               className="absolute top-5 right-5 text-text-muted hover:text-text-main p-1.5 rounded-lg hover:bg-surface-subtle transition"
@@ -512,8 +622,8 @@ export function AdminCoupons() {
               <TicketPercent className="w-5 h-5 text-brand" />
               {editingCoupon ? 'Edit Coupon' : 'Create New Coupon'}
             </h3>
-            <p className="text-xs text-text-muted mb-5">
-              Specify voucher code, discount percentage or flat amount, and usage constraints.
+            <p className="text-xs text-text-muted mb-4">
+              Specify voucher code, discount percentage or flat amount, scope eligibility, and usage constraints.
             </p>
 
             {formError && (
@@ -534,6 +644,227 @@ export function AdminCoupons() {
                   placeholder="e.g. FESTIVE20, SAVE50"
                   className="w-full bg-primary-bg border border-border-neutral rounded-xl px-3 py-2 text-brand font-mono uppercase tracking-wider focus:outline-none focus:border-brand focus:ring-1 focus:ring-brand"
                 />
+              </div>
+
+              {/* Scope & Applicability Configuration */}
+              <div className="p-3 bg-surface-subtle rounded-xl border border-border-neutral space-y-3">
+                <div>
+                  <label className="block text-text-main font-semibold mb-1">
+                    Coupon Applicability (Scope) *
+                  </label>
+                  <p className="text-[11px] text-text-muted mb-2.5">
+                    Control which products or categories in the customer cart qualify for this coupon.
+                  </p>
+                  <div className="grid grid-cols-3 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setForm({ ...form, applicabilityType: 'ALL_PRODUCTS' })}
+                      className={`px-3 py-2 rounded-xl border text-center font-semibold text-xs transition cursor-pointer ${
+                        form.applicabilityType === 'ALL_PRODUCTS'
+                          ? 'bg-brand/10 border-brand text-brand shadow-xs'
+                          : 'bg-surface border-border-neutral text-text-muted hover:text-text-main hover:bg-border-neutral/30'
+                      }`}
+                    >
+                      Entire Store
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setForm({ ...form, applicabilityType: 'CATEGORIES' })}
+                      className={`px-3 py-2 rounded-xl border text-center font-semibold text-xs transition cursor-pointer ${
+                        form.applicabilityType === 'CATEGORIES'
+                          ? 'bg-brand/10 border-brand text-brand shadow-xs'
+                          : 'bg-surface border-border-neutral text-text-muted hover:text-text-main hover:bg-border-neutral/30'
+                      }`}
+                    >
+                      Specific Categories
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setForm({ ...form, applicabilityType: 'PRODUCTS' });
+                        if (products.length === 0) fetchProducts('');
+                      }}
+                      className={`px-3 py-2 rounded-xl border text-center font-semibold text-xs transition cursor-pointer ${
+                        form.applicabilityType === 'PRODUCTS'
+                          ? 'bg-brand/10 border-brand text-brand shadow-xs'
+                          : 'bg-surface border-border-neutral text-text-muted hover:text-text-main hover:bg-border-neutral/30'
+                      }`}
+                    >
+                      Specific Products
+                    </button>
+                  </div>
+                </div>
+
+                {/* Categories Selector */}
+                {form.applicabilityType === 'CATEGORIES' && (
+                  <div className="pt-2 border-t border-border-neutral space-y-2.5">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="font-semibold text-text-main">
+                        Select Categories ({form.selectedCategoryIds.length} selected)
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setForm({ ...form, selectedCategoryIds: categories.map((c) => c._id) })
+                          }
+                          className="text-brand hover:underline font-semibold cursor-pointer"
+                        >
+                          Select All
+                        </button>
+                        <span className="text-text-muted">•</span>
+                        <button
+                          type="button"
+                          onClick={() => setForm({ ...form, selectedCategoryIds: [] })}
+                          className="text-text-muted hover:text-status-error font-semibold cursor-pointer"
+                        >
+                          Clear
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="relative">
+                      <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-text-muted" />
+                      <input
+                        type="text"
+                        value={categorySearch}
+                        onChange={(e) => setCategorySearch(e.target.value)}
+                        placeholder="Filter categories..."
+                        className="w-full bg-surface border border-border-neutral rounded-lg pl-8 pr-3 py-1.5 text-xs text-text-main focus:outline-none focus:border-brand"
+                      />
+                    </div>
+
+                    <div className="max-h-36 overflow-y-auto space-y-1 pr-1">
+                      {categories
+                        .filter(
+                          (c) =>
+                            !categorySearch ||
+                            c.name.toLowerCase().includes(categorySearch.toLowerCase())
+                        )
+                        .map((cat) => {
+                          const isSelected = form.selectedCategoryIds.includes(cat._id);
+                          return (
+                            <label
+                              key={cat._id}
+                              className={`flex items-center justify-between p-2 rounded-lg border cursor-pointer text-xs transition ${
+                                isSelected
+                                  ? 'bg-brand/10 border-brand/50 text-brand font-semibold'
+                                  : 'bg-surface border-border-neutral hover:bg-surface-subtle text-text-main'
+                              }`}
+                            >
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="checkbox"
+                                  checked={isSelected}
+                                  onChange={() => {
+                                    const next = isSelected
+                                      ? form.selectedCategoryIds.filter((id) => id !== cat._id)
+                                      : [...form.selectedCategoryIds, cat._id];
+                                    setForm({ ...form, selectedCategoryIds: next });
+                                  }}
+                                  className="rounded accent-brand cursor-pointer"
+                                />
+                                <span>{cat.name}</span>
+                              </div>
+                            </label>
+                          );
+                        })}
+                      {categories.length === 0 && (
+                        <p className="text-[11px] text-text-muted py-2 text-center">
+                          No categories found.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Products Selector */}
+                {form.applicabilityType === 'PRODUCTS' && (
+                  <div className="pt-2 border-t border-border-neutral space-y-2.5">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="font-semibold text-text-main">
+                        Select Products ({form.selectedProductIds.length} selected)
+                      </span>
+                      {form.selectedProductIds.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setForm({ ...form, selectedProductIds: [] })}
+                          className="text-text-muted hover:text-status-error font-semibold cursor-pointer"
+                        >
+                          Clear Selection
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="relative">
+                      <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-text-muted" />
+                      <input
+                        type="text"
+                        value={productSearch}
+                        onChange={(e) => setProductSearch(e.target.value)}
+                        placeholder="Search products by title or brand..."
+                        className="w-full bg-surface border border-border-neutral rounded-lg pl-8 pr-3 py-1.5 text-xs text-text-main focus:outline-none focus:border-brand"
+                      />
+                    </div>
+
+                    <div className="max-h-44 overflow-y-auto space-y-1.5 pr-1">
+                      {searchingProducts ? (
+                        <div className="py-4 text-center text-text-muted text-[11px] flex items-center justify-center gap-2">
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          <span>Searching catalog...</span>
+                        </div>
+                      ) : (
+                        products.map((prod) => {
+                          const isSelected = form.selectedProductIds.includes(prod._id);
+                          return (
+                            <label
+                              key={prod._id}
+                              className={`flex items-center justify-between p-2 rounded-lg border cursor-pointer text-xs transition ${
+                                isSelected
+                                  ? 'bg-brand/10 border-brand/50 text-brand font-semibold'
+                                  : 'bg-surface border-border-neutral hover:bg-surface-subtle text-text-main'
+                              }`}
+                            >
+                              <div className="flex items-center gap-2.5 overflow-hidden">
+                                <input
+                                  type="checkbox"
+                                  checked={isSelected}
+                                  onChange={() => {
+                                    const next = isSelected
+                                      ? form.selectedProductIds.filter((id) => id !== prod._id)
+                                      : [...form.selectedProductIds, prod._id];
+                                    setForm({ ...form, selectedProductIds: next });
+                                  }}
+                                  className="rounded accent-brand shrink-0 cursor-pointer"
+                                />
+                                {prod.images?.[0] ? (
+                                  <img
+                                    src={prod.images[0]}
+                                    alt=""
+                                    className="w-7 h-7 rounded-md object-cover border border-border-neutral shrink-0"
+                                  />
+                                ) : (
+                                  <div className="w-7 h-7 rounded-md bg-surface border border-border-neutral shrink-0" />
+                                )}
+                                <div className="truncate">
+                                  <p className="truncate text-xs font-semibold">{prod.name}</p>
+                                  <p className="text-[10px] text-text-muted font-normal">
+                                    {prod.brand || 'Khushboo'} • {prod.category?.name || 'Grocery'}
+                                  </p>
+                                </div>
+                              </div>
+                            </label>
+                          );
+                        })
+                      )}
+                      {!searchingProducts && products.length === 0 && (
+                        <p className="text-[11px] text-text-muted py-2 text-center">
+                          No products found matching "{productSearch}".
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-3">
@@ -566,7 +897,7 @@ export function AdminCoupons() {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-text-main font-semibold mb-1">Min Order (₹)</label>
+                  <label className="block text-text-main font-semibold mb-1">Min Eligible Subtotal (₹)</label>
                   <input
                     type="number"
                     min={0}
@@ -622,13 +953,13 @@ export function AdminCoupons() {
                 />
               </div>
 
-              <div className="flex items-center gap-2 pt-2">
+              <div className="flex items-center gap-2 pt-1">
                 <input
                   type="checkbox"
                   id="isActiveCoupon"
                   checked={form.isActive}
                   onChange={(e) => setForm({ ...form, isActive: e.target.checked })}
-                  className="w-4 h-4 rounded accent-brand"
+                  className="w-4 h-4 rounded accent-brand cursor-pointer"
                 />
                 <label htmlFor="isActiveCoupon" className="text-text-main font-semibold cursor-pointer">
                   Activate coupon immediately for customer checkout
@@ -639,14 +970,14 @@ export function AdminCoupons() {
                 <button
                   type="button"
                   onClick={() => setIsModalOpen(false)}
-                  className="px-4 py-2 rounded-xl border border-border-neutral text-text-muted hover:text-text-main hover:bg-surface-subtle transition font-semibold"
+                  className="px-4 py-2 rounded-xl border border-border-neutral text-text-muted hover:text-text-main hover:bg-surface-subtle transition font-semibold cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={saving}
-                  className="px-5 py-2 rounded-xl bg-brand hover:bg-brand-hover text-white font-semibold transition flex items-center gap-2 shadow-xs"
+                  className="px-5 py-2 rounded-xl bg-brand hover:bg-brand-hover text-white font-semibold transition flex items-center gap-2 shadow-xs cursor-pointer"
                 >
                   {saving ? (
                     <>

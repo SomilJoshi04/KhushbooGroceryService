@@ -32,29 +32,15 @@ export const phoneValidator = z
   });
 
 /**
- * Robust Password Policy:
- * - At least 12 characters.
- * - Contains at least one uppercase letter.
- * - Contains at least one lowercase letter.
- * - Contains at least one digit.
- * - Contains at least one special character.
+ * Simplified User-Friendly Password Policy:
+ * - At least 6 characters.
+ * - Max 128 characters.
+ * - Allows any mix of letters (A-Z, a-z), numbers (0-9), and special characters (!@#$%^&* etc.).
  */
 export const strongPasswordValidator = z
   .string()
-  .min(12, 'Password must be at least 12 characters long')
-  .max(128, 'Password cannot exceed 128 characters')
-  .refine((val) => /[A-Z]/.test(val), {
-    message: 'Password must include at least one uppercase letter',
-  })
-  .refine((val) => /[a-z]/.test(val), {
-    message: 'Password must include at least one lowercase letter',
-  })
-  .refine((val) => /[0-9]/.test(val), {
-    message: 'Password must include at least one number',
-  })
-  .refine((val) => /[^A-Za-z0-9]/.test(val), {
-    message: 'Password must include at least one special character (e.g. !@#$%^&*)',
-  });
+  .min(6, 'Password must be at least 6 characters long')
+  .max(128, 'Password cannot exceed 128 characters');
 
 /**
  * Username Policy:
@@ -90,7 +76,7 @@ export const registerSchema = z
     fullName: z
       .string()
       .trim()
-      .min(2, 'Full name must be at least 2 characters')
+      .min(1, 'Full name is required')
       .max(100, 'Full name cannot exceed 100 characters'),
     username: usernameValidator.optional(),
     email: emailValidator,

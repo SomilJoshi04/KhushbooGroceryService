@@ -43,8 +43,9 @@ export function validate(targets) {
     } catch (err) {
       if (err instanceof ZodError) {
         const issues = err.issues || err.errors || [];
+        const primaryMessage = issues[0]?.message || 'Validation failed';
         // Pass as a structured error to the centralized error handler.
-        const validationErr = Object.assign(new Error('Validation failed'), {
+        const validationErr = Object.assign(new Error(primaryMessage), {
           name: 'ZodError',
           issues,
           errors: issues,

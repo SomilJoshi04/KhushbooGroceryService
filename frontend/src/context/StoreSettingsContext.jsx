@@ -44,6 +44,10 @@ const DEFAULT_SETTINGS = {
     soundEnabled: true,
     soundCooldownSeconds: 3,
   },
+  distanceBasedPricing: {
+    enabled: false,
+    rules: [],
+  },
 };
 
 export function StoreSettingsProvider({ children }) {
@@ -105,6 +109,10 @@ export function StoreSettingsProvider({ children }) {
           notificationSettings: {
             soundEnabled: d.notificationSettings?.soundEnabled ?? true,
             soundCooldownSeconds: d.notificationSettings?.soundCooldownSeconds ?? 3,
+          },
+          distanceBasedPricing: {
+            enabled: d.distanceBasedPricing?.enabled ?? false,
+            rules: d.distanceBasedPricing?.rules || [],
           },
           loading: false,
         };

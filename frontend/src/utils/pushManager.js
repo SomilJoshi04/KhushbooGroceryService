@@ -145,8 +145,9 @@ export async function getCurrentSubscription() {
  *
  * 1. Prompts user for browser notification permission if not yet granted.
  * 2. Registers service worker.
- * 3. Subscribes device via pushManager with VAPID applicationServerKey.
- * 4. Sends serialized subscription payload to backend /api/push/subscribe.
+ * 3. Forces unsubscribe of any stale subscription (VAPID key mismatch protection).
+ * 4. Subscribes device via pushManager with VAPID applicationServerKey.
+ * 5. Sends serialized subscription payload to backend /api/push/subscribe.
  *
  * @returns {Promise<PushSubscription>}
  */
@@ -172,16 +173,28 @@ export async function subscribeToPush() {
   const vapidKey = await getVapidPublicKey();
   const applicationServerKey = urlBase64ToUint8Array(vapidKey);
 
-  // 4. Subscribe with browser PushManager
-  let subscription = await registration.pushManager.getSubscription();
-  if (!subscription) {
-    subscription = await registration.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey,
-    });
+  // 4. Force-clear any existing stale subscription.
+  //    If a subscription was created with a different VAPID key (e.g. after key rotation or
+  //    switching environments), re-using the stale endpoint causes a "Registration failed -
+  //    push service error" on subscribe and 410 Gone on send. Unsubscribing first ensures
+  //    the browser requests a fresh endpoint from the push service with the correct VAPID key.
+  const existingSubscription = await registration.pushManager.getSubscription();
+  if (existingSubscription) {
+    try {
+      await existingSubscription.unsubscribe();
+    } catch (unsubErr) {
+      // Non-fatal: if stale unsubscribe fails, attempt fresh subscribe anyway.
+      console.warn('[pushManager] Stale subscription unsubscribe failed (non-fatal):', unsubErr.message);
+    }
   }
 
-  // 5. Serialize subscription data
+  // 5. Create a fresh push subscription with the current VAPID key
+  const subscription = await registration.pushManager.subscribe({
+    userVisibleOnly: true,
+    applicationServerKey,
+  });
+
+  // 6. Serialize subscription data
   const rawSub = subscription.toJSON();
   const payload = {
     endpoint: subscription.endpoint,
@@ -196,7 +209,7 @@ export async function subscribeToPush() {
     },
   };
 
-  // 6. Synchronize with backend API
+  // 7. Synchronize with backend API
   await apiClient.post('/push/subscribe', payload);
 
   return subscription;

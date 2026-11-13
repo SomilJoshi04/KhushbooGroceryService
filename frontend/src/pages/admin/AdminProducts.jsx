@@ -21,6 +21,7 @@ import {
   AlertCircle,
   CheckCircle2,
   Image as ImageIcon,
+  ChevronDown,
 } from 'lucide-react';
 import { ImageUpload } from '../../components/common/ImageUpload.jsx';
 import { Pagination } from '../../components/Pagination.jsx';
@@ -29,6 +30,161 @@ import { BulkActionBar } from '../../components/BulkActionBar.jsx';
 import { BulkConfirmModal } from '../../components/BulkConfirmModal.jsx';
 import { SkeletonTable, ImageWithSkeleton } from '../../components/skeleton/index.js';
 import { swrCache } from '../../utils/swrCache.js';
+
+/**
+ * Clean, industry-standard cell for displaying product variants in the table.
+ * Shows first 2 variants, and if there are 3+, displays a "+N more" badge
+ * that opens a sleek detailed popover, keeping all table rows uniform.
+ */
+function ProductVariantsCell({ product, isNearBottom }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const popoverRef = useRef(null);
+
+  const variants = product.variants || [];
+  const maxVisible = 2;
+  const visibleVariants = variants.slice(0, maxVisible);
+  const remainingCount = variants.length - maxVisible;
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleClickOutside = (e) => {
+      if (popoverRef.current && !popoverRef.current.contains(e.target)) {
+        setIsOpen(false);
+      }
+    };
+
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') setIsOpen(false);
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isOpen]);
+
+  if (variants.length === 0) {
+    return <span className="text-text-muted text-[11px] italic">No variants</span>;
+  }
+
+  return (
+    <div className="relative inline-block text-left" ref={popoverRef}>
+      <div className="flex flex-wrap items-center gap-1.5 max-w-full sm:max-w-[260px]">
+        {visibleVariants.map((v) => (
+          <span
+            key={v.sku || v.label}
+            className="px-2 py-0.5 rounded-md bg-surface-subtle border border-border-neutral text-[10px] font-mono text-text-main shrink-0"
+          >
+            {v.label} ({v.stock} in stock)
+          </span>
+        ))}
+
+        {remainingCount > 0 && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setIsOpen((prev) => !prev);
+            }}
+            className={`px-2 py-0.5 rounded-md text-[10px] font-bold border transition inline-flex items-center gap-1 cursor-pointer select-none shrink-0 ${
+              isOpen
+                ? 'bg-brand text-white border-brand shadow-xs'
+                : 'bg-brand-light/60 hover:bg-brand-light text-brand border-brand/30 hover:border-brand shadow-2xs'
+            }`}
+            title={`Click to view all ${variants.length} pack variants`}
+            aria-expanded={isOpen}
+          >
+            <span>+{remainingCount} more</span>
+            <ChevronDown
+              className={`w-3 h-3 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}
+            />
+          </button>
+        )}
+      </div>
+
+      {/* Popover Card */}
+      {isOpen && (
+        <div
+          onClick={(e) => e.stopPropagation()}
+          className={`absolute left-0 ${
+            isNearBottom ? 'bottom-full mb-1.5' : 'top-full mt-1.5'
+          } z-40 w-72 max-w-[calc(100vw-3rem)] bg-surface border border-border-neutral rounded-xl shadow-2xl p-3 animate-fadeIn text-text-main`}
+          style={{ minWidth: '260px' }}
+        >
+          {/* Header */}
+          <div className="flex items-center justify-between pb-2 mb-2 border-b border-border-neutral">
+            <div className="min-w-0 pr-2">
+              <p className="font-bold text-xs text-text-main leading-tight truncate">
+                {product.name}
+              </p>
+              <p className="text-[10px] text-text-muted mt-0.5">
+                All {variants.length} pack variants
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsOpen(false)}
+              className="p-1 rounded-md text-text-muted hover:text-text-main hover:bg-surface-subtle transition cursor-pointer shrink-0"
+              aria-label="Close popover"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          {/* Variants List */}
+          <div className="max-h-56 overflow-y-auto space-y-1.5 pr-1 scrollbar-thin">
+            {variants.map((v, idx) => {
+              const inStock = (v.stock || 0) > 0;
+              const isLowStock = inStock && v.stock <= 5;
+              const price = ((v.pricePaise || 0) / 100).toFixed(0);
+              const mrp = ((v.mrpPaise || 0) / 100).toFixed(0);
+
+              return (
+                <div
+                  key={v.sku || idx}
+                  className="p-2 rounded-lg bg-surface-subtle border border-border-neutral/70 flex items-center justify-between gap-2 text-xs"
+                >
+                  <div className="min-w-0">
+                    <span className="font-bold text-text-main block truncate">
+                      {v.label}
+                    </span>
+                    <span className="text-[10px] font-mono text-text-muted block truncate">
+                      {v.sku || 'No SKU'}
+                    </span>
+                  </div>
+
+                  <div className="text-right shrink-0">
+                    <span className="font-bold text-text-main block">
+                      ₹{price}
+                      {mrp && Number(mrp) > Number(price) && (
+                        <span className="text-[10px] text-text-muted line-through ml-1">₹{mrp}</span>
+                      )}
+                    </span>
+                    <span
+                      className={`inline-block px-1.5 py-0.5 rounded text-[9.5px] font-semibold border ${
+                        !inStock
+                          ? 'bg-status-error/10 text-status-error border-status-error/20'
+                          : isLowStock
+                          ? 'bg-amber-50 text-amber-700 border-amber-200'
+                          : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                      }`}
+                    >
+                      {inStock ? `${v.stock} in stock` : 'Out of stock'}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function AdminProducts() {
   const [products, setProducts] = useState([]);
@@ -507,7 +663,7 @@ export function AdminProducts() {
 
       {/* Products Table */}
       {loading ? (
-        <SkeletonTable rows={8} columns={6} showToolbar={false} showPagination={true} />
+        <SkeletonTable rows={8} columns={7} showToolbar={false} showPagination={true} />
       ) : error ? (
         <div className="p-6 bg-red-50 border border-red-200 text-status-error rounded-2xl text-center">
           {error}
@@ -519,11 +675,120 @@ export function AdminProducts() {
         </div>
       ) : (
         <div className="bg-surface border border-border-neutral rounded-2xl overflow-hidden shadow-xs">
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[750px] text-left text-xs">
+          {/* Mobile Card Layout (Shown on mobile screens < md) */}
+          <div className="block md:hidden">
+            <div className="p-3.5 bg-surface-subtle border-b border-border-neutral flex items-center justify-between text-xs">
+              <label className="flex items-center gap-2.5 cursor-pointer font-semibold text-text-main select-none">
+                <input
+                  type="checkbox"
+                  checked={
+                    products.length > 0 &&
+                    bulk.getPageSelectionState(products.map((p) => p._id)).isAllSelected
+                  }
+                  onChange={() => bulk.toggleSelectPage(products.map((p) => p._id))}
+                  className="rounded accent-brand w-4 h-4"
+                />
+                <span>Select All ({products.length})</span>
+              </label>
+              <span className="text-[11px] text-text-muted font-medium">
+                {bulk.selectedCount > 0 ? `${bulk.selectedCount} selected` : `Page ${page} of ${pagination.totalPages || 1}`}
+              </span>
+            </div>
+
+            <div className="divide-y divide-border-neutral">
+              {products.map((p, idx) => {
+                const prices = p.variants?.map((v) => v.pricePaise / 100) || [0];
+                const minPrice = Math.min(...prices);
+                const maxPrice = Math.max(...prices);
+                const isSelected = bulk.isSelected(p._id);
+
+                return (
+                  <div
+                    key={p._id}
+                    className={`p-4 space-y-3 transition ${isSelected ? 'bg-brand-light/30' : 'hover:bg-surface-subtle/50'}`}
+                  >
+                    {/* Top: Checkbox, Thumbnail, Title & Status */}
+                    <div className="flex items-start gap-3">
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => bulk.toggleSelect(p._id)}
+                        className="mt-1 rounded accent-brand shrink-0 w-4 h-4"
+                      />
+                      <ImageWithSkeleton
+                        src={p.images?.[0]}
+                        alt={p.name}
+                        aspectRatio="aspect-square"
+                        containerClassName="w-12 h-12 rounded-xl shrink-0 bg-surface-subtle border border-border-neutral overflow-hidden"
+                        className="w-full h-full object-cover rounded-xl"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-start justify-between gap-2">
+                          <span className="font-bold text-text-main text-xs block leading-snug truncate">
+                            {p.name}
+                          </span>
+                          <span
+                            className={`shrink-0 px-2 py-0.5 rounded-md text-[9.5px] font-bold uppercase tracking-wider ${
+                              p.isPublished
+                                ? 'bg-emerald-50 text-status-success border border-emerald-200'
+                                : 'bg-surface-subtle text-text-muted border border-border-neutral'
+                            }`}
+                          >
+                            {p.isPublished ? 'Published' : 'Archived'}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5 mt-1 text-[10px] text-text-muted flex-wrap">
+                          <span className="text-brand font-mono truncate max-w-[140px]">{p.slug}</span>
+                          <span>•</span>
+                          <span className="font-semibold text-text-main">{p.category?.name || 'Uncategorized'}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Price Range & Variants */}
+                    <div className="bg-surface-subtle/70 rounded-xl p-3 border border-border-neutral/60 space-y-2">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-text-muted">
+                          Price Range
+                        </span>
+                        <span className="text-sm font-extrabold text-brand font-mono">
+                          {minPrice === maxPrice ? `₹${minPrice}` : `₹${minPrice} – ₹${maxPrice}`}
+                        </span>
+                      </div>
+                      <div className="pt-2 border-t border-border-neutral/40">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-text-muted block mb-1.5">
+                          Pack Variants ({p.variants?.length || 0})
+                        </span>
+                        <ProductVariantsCell
+                          product={p}
+                          isNearBottom={idx >= products.length - 2 && products.length > 2}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Action Button */}
+                    <div className="pt-1">
+                      <button
+                        type="button"
+                        onClick={() => handleOpenEditModal(p)}
+                        className="w-full py-2 px-3 rounded-xl bg-surface hover:bg-surface-subtle border border-border-neutral text-brand font-bold text-xs transition inline-flex items-center justify-center gap-1.5 shadow-xs"
+                      >
+                        <Edit2 className="w-3.5 h-3.5" />
+                        <span>Edit Product & Variants</span>
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Desktop Table View (md and above) */}
+          <div className="hidden md:block overflow-x-auto">
+            <table className="w-full min-w-[850px] text-left text-xs">
               <thead className="bg-surface-subtle text-[11px] uppercase tracking-wider text-text-muted border-b border-border-neutral">
                 <tr>
-                  <th className="p-4 w-10 text-center">
+                  <th className="p-4 w-10 text-center whitespace-nowrap">
                     <input
                       type="checkbox"
                       checked={
@@ -534,16 +799,16 @@ export function AdminProducts() {
                       className="rounded accent-brand"
                     />
                   </th>
-                  <th className="p-4 font-semibold">Product</th>
-                  <th className="p-4 font-semibold">Department</th>
-                  <th className="p-4 font-semibold">Pack Variants</th>
-                  <th className="p-4 font-semibold">Price Range</th>
-                  <th className="p-4 font-semibold">Status</th>
-                  <th className="p-4 font-semibold text-right">Actions</th>
+                  <th className="p-4 font-semibold whitespace-nowrap min-w-[240px]">Product</th>
+                  <th className="p-4 font-semibold whitespace-nowrap min-w-[140px]">Department</th>
+                  <th className="p-4 font-semibold whitespace-nowrap min-w-[180px]">Pack Variants</th>
+                  <th className="p-4 font-semibold whitespace-nowrap min-w-[120px]">Price Range</th>
+                  <th className="p-4 font-semibold whitespace-nowrap min-w-[100px]">Status</th>
+                  <th className="p-4 font-semibold text-right whitespace-nowrap min-w-[90px]">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border-neutral">
-                {products.map((p) => {
+                {products.map((p, idx) => {
                   const prices = p.variants?.map((v) => v.pricePaise / 100) || [0];
                   const minPrice = Math.min(...prices);
                   const maxPrice = Math.max(...prices);
@@ -554,7 +819,7 @@ export function AdminProducts() {
                       key={p._id}
                       className={`transition ${isSelected ? 'bg-brand-light/30' : 'hover:bg-surface-subtle/60'}`}
                     >
-                      <td className="p-4 text-center">
+                      <td className="p-4 text-center whitespace-nowrap">
                         <input
                           type="checkbox"
                           checked={isSelected}
@@ -562,42 +827,38 @@ export function AdminProducts() {
                           className="rounded accent-brand"
                         />
                       </td>
-                      <td className="p-4 flex items-center gap-3">
-                        <ImageWithSkeleton
-                          src={p.images?.[0]}
-                          alt={p.name}
-                          aspectRatio="aspect-square"
-                          containerClassName="w-12 h-12 rounded-xl shrink-0 bg-surface-subtle border border-border-neutral overflow-hidden"
-                          className="w-full h-full object-cover rounded-xl"
-                        />
-                        <div>
-                          <span className="font-bold text-text-main block max-w-xs truncate">{p.name}</span>
-                          <span className="text-[10px] text-brand font-mono">{p.slug}</span>
+                      <td className="p-4 whitespace-nowrap">
+                        <div className="flex items-center gap-3">
+                          <ImageWithSkeleton
+                            src={p.images?.[0]}
+                            alt={p.name}
+                            aspectRatio="aspect-square"
+                            containerClassName="w-12 h-12 rounded-xl shrink-0 bg-surface-subtle border border-border-neutral overflow-hidden"
+                            className="w-full h-full object-cover rounded-xl"
+                          />
+                          <div className="min-w-0">
+                            <span className="font-bold text-text-main block max-w-xs truncate">{p.name}</span>
+                            <span className="text-[10px] text-brand font-mono block">{p.slug}</span>
+                          </div>
                         </div>
                       </td>
 
-                      <td className="p-4 text-text-main font-semibold">
+                      <td className="p-4 text-text-main font-semibold whitespace-nowrap">
                         {p.category?.name || 'Uncategorized'}
                       </td>
 
-                      <td className="p-4">
-                        <div className="flex flex-wrap gap-1">
-                          {p.variants?.map((v) => (
-                            <span
-                              key={v.sku}
-                              className="px-2 py-0.5 rounded-md bg-surface-subtle border border-border-neutral text-[10px] font-mono text-text-main"
-                            >
-                              {v.label} ({v.stock} in stock)
-                            </span>
-                          ))}
-                        </div>
+                      <td className="p-4 whitespace-nowrap">
+                        <ProductVariantsCell
+                          product={p}
+                          isNearBottom={idx >= products.length - 2 && products.length > 2}
+                        />
                       </td>
 
-                      <td className="p-4 font-bold text-text-main">
+                      <td className="p-4 font-bold text-text-main whitespace-nowrap font-mono text-sm">
                         {minPrice === maxPrice ? `₹${minPrice}` : `₹${minPrice} – ₹${maxPrice}`}
                       </td>
 
-                      <td className="p-4">
+                      <td className="p-4 whitespace-nowrap">
                         <span
                           className={`px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider ${
                             p.isPublished
@@ -609,7 +870,7 @@ export function AdminProducts() {
                         </span>
                       </td>
 
-                      <td className="p-4 text-right">
+                      <td className="p-4 text-right whitespace-nowrap">
                         <button
                           type="button"
                           onClick={() => handleOpenEditModal(p)}

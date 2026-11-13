@@ -101,9 +101,9 @@ export async function register(req, res, next) {
       email: normalizedEmail,
       password: hashedPassword,
       role: 'CUSTOMER',
-      isEmailVerified,
-      emailVerificationTokenHash: isEmailVerified ? null : verificationTokenHash,
-      emailVerificationExpires: isEmailVerified ? null : verificationExpires,
+      isEmailVerified: true,
+      emailVerificationTokenHash: null,
+      emailVerificationExpires: null,
       isActive: true,
       privacyConsent: {
         agreed: Boolean(acceptTerms),
@@ -121,12 +121,12 @@ export async function register(req, res, next) {
 
     const newUser = await User.create(userPayload);
 
-    // Send branded verification email (only if SMTP is configured)
+    // Send welcome email in background if SMTP is configured (non-blocking)
     if (isSmtpConfigured) {
       try {
         await sendVerificationEmail(normalizedEmail, fullName, rawVerificationToken);
       } catch (emailErr) {
-        console.error('[auth:register] Failed to deliver verification email:', emailErr.message);
+        console.error('[auth:register] Failed to deliver welcome email:', emailErr.message);
       }
     }
 
@@ -141,14 +141,19 @@ export async function register(req, res, next) {
       requestId: req.id,
     });
 
+    // Auto-login: Issue JWT access token and 30-day rotating refresh token cookie immediately
+    const { accessToken } = await issueUserSession(res, newUser, {
+      rememberMe: true,
+      req,
+    });
+
     res.status(201).json({
       success: true,
       requestId: req.id,
-      isEmailVerified,
-      message: isEmailVerified
-        ? 'Registration successful! Your account is active. Please sign in.'
-        : 'Registration successful! A verification link has been sent to your email address. Please verify your email before logging in.',
-      email: normalizedEmail,
+      message: 'Registration successful! Welcome to Khushboo Food Service.',
+      user: newUser.toSafeObject(),
+      token: accessToken,
+      accessToken,
     });
   } catch (err) {
     if (err.code === 11000) {

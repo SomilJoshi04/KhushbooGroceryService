@@ -188,10 +188,18 @@ export function AuthProvider({ children }) {
   }, []);
 
   /**
-   * Customer Registration
+   * Customer Registration (Auto-logins with issued token and user session)
    */
   const register = async (registrationData) => {
     const res = await apiClient.post('/auth/register', registrationData);
+    if (res.data?.success && res.data?.token) {
+      if (typeof window !== 'undefined') {
+        sessionStorage.removeItem('khushboo_admin_preview');
+      }
+      setIsPreviewMode(false);
+      setToken(res.data.token);
+      setUser(res.data.user);
+    }
     return res.data;
   };
 

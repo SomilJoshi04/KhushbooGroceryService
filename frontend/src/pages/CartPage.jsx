@@ -45,6 +45,7 @@ import { apiClient, resolveImageUrl, getApiUploadUrl, NEUTRAL_PRODUCT_PLACEHOLDE
 import { LocationPickerModal } from '../components/map/LocationPickerModal.jsx';
 import { ImageWithSkeleton } from '../components/skeleton/index.js';
 import { useOrderSuccessSound } from '../hooks/useOrderSuccessSound.js';
+import { safeParseStoredLocation, validateCoordinates } from '../utils/coordinateValidator.js';
 
 export function CartPage({ onOpenAuth }) {
   const {
@@ -78,6 +79,7 @@ export function CartPage({ onOpenAuth }) {
   const [state, setState] = useState('Madhya Pradesh');
   const [pincode, setPincode] = useState('452001');
   const [deliveryCoordinates, setDeliveryCoordinates] = useState(null);
+  const [deliveryQuote, setDeliveryQuote] = useState(null);
   const [isMapModalOpen, setIsMapModalOpen] = useState(false);
   const [recipientName, setRecipientName] = useState('Valued Customer');
   const [selectedAddressId, setSelectedAddressId] = useState('');
@@ -190,14 +192,13 @@ export function CartPage({ onOpenAuth }) {
         if (def.pincode) handlePincodeChange(def.pincode, def.coordinates);
       }
     } else {
-      // Check if customer selected a location from the header
+      // Check if customer selected a location from the header (safely validated)
       try {
         const stored = localStorage.getItem('khushboo_customer_location');
-        if (stored) {
-          const parsed = JSON.parse(stored);
+        const parsed = safeParseStoredLocation(stored);
+        if (parsed) {
           if (parsed.formattedAddress) setStreetAddress(parsed.formattedAddress);
           if (parsed.city) setCity(parsed.city);
-          if (parsed.state) setState(parsed.state);
           if (parsed.coordinates) setDeliveryCoordinates(parsed.coordinates);
           if (parsed.pincode) {
             setPincode(parsed.pincode);
@@ -272,7 +273,11 @@ export function CartPage({ onOpenAuth }) {
   );
 
   const couponDiscountPaise = appliedCoupon?.discountPaise || 0;
-  const finalPayablePaise = Math.max(0, grandTotalPaise - couponDiscountPaise);
+  const effectiveDeliveryFeePaise = deliveryQuote?.deliveryFeePaise !== undefined
+    ? (isFreeDelivery ? 0 : deliveryQuote.deliveryFeePaise)
+    : deliveryFeePaise;
+  const effectiveGrandTotalPaise = cartSubtotalPaise + effectiveDeliveryFeePaise;
+  const finalPayablePaise = Math.max(0, effectiveGrandTotalPaise - couponDiscountPaise);
 
   const handlePincodeChange = async (newPincode, coords = null) => {
     setPincode(newPincode);
@@ -289,6 +294,7 @@ export function CartPage({ onOpenAuth }) {
         setIsPincodeServiceable(res.data.isServiceable);
         setIsZonePaused(Boolean(res.data.isPaused));
         setPincodeReason(res.data.reason || res.data.pauseReason || '');
+        setDeliveryQuote(res.data);
         const zoneData = res.data.zone
           ? {
               ...res.data.zone,
@@ -300,6 +306,7 @@ export function CartPage({ onOpenAuth }) {
         setIsPincodeServiceable(false);
         setIsZonePaused(false);
         setPincodeReason('Unable to verify delivery for this PIN code');
+        setDeliveryQuote(null);
       }
     }
   };
@@ -320,6 +327,9 @@ export function CartPage({ onOpenAuth }) {
 
   const handleLocationPickedFromMap = (locationData) => {
     if (!locationData) return;
+    const coordCheck = validateCoordinates(locationData.coordinates);
+    const validCoords = coordCheck.valid && coordCheck.normalized ? coordCheck.normalized : null;
+
     if (locationData.formattedAddress) {
       setStreetAddress(locationData.formattedAddress);
     }
@@ -329,18 +339,24 @@ export function CartPage({ onOpenAuth }) {
     if (locationData.state) {
       setState(locationData.state);
     }
-    if (locationData.coordinates) {
-      setDeliveryCoordinates(locationData.coordinates);
+    if (validCoords) {
+      setDeliveryCoordinates(validCoords);
     }
     const targetPincode = locationData.pincode || pincode;
     if (locationData.pincode) {
       setPincode(locationData.pincode);
     }
-    handlePincodeChange(targetPincode, locationData.coordinates);
+    handlePincodeChange(targetPincode, validCoords);
 
     try {
-      localStorage.setItem('khushboo_customer_location', JSON.stringify(locationData));
-      window.dispatchEvent(new CustomEvent('khushboo:location_changed', { detail: locationData }));
+      if (validCoords) {
+        const payloadToStore = {
+          ...locationData,
+          coordinates: validCoords,
+        };
+        localStorage.setItem('khushboo_customer_location', JSON.stringify(payloadToStore));
+        window.dispatchEvent(new CustomEvent('khushboo:location_changed', { detail: payloadToStore }));
+      }
     } catch (e) {}
 
     setIsMapModalOpen(false);
@@ -357,6 +373,12 @@ export function CartPage({ onOpenAuth }) {
       const res = await apiClient.post('/v1/store/coupons/validate', {
         code,
         subtotalPaise: cartSubtotalPaise,
+        items: cart.map((i) => ({
+          productId: i.productId,
+          sku: i.variantSku,
+          quantity: i.qty,
+          pricePaise: i.pricePaise,
+        })),
       });
 
       if (res.data?.success && res.data?.valid) {
@@ -371,6 +393,16 @@ export function CartPage({ onOpenAuth }) {
       setCouponLoading(false);
     }
   };
+
+  // Auto-revalidate applied coupon if cart items or quantities change
+  const appliedCouponCode = appliedCoupon?.code;
+  useEffect(() => {
+    if (appliedCouponCode && cart.length > 0) {
+      handleApplyCoupon(appliedCouponCode);
+    } else if (cart.length === 0 && appliedCouponCode) {
+      setAppliedCoupon(null);
+    }
+  }, [cartSubtotalPaise, cart.length, appliedCouponCode]);
 
   const handlePlaceOrder = async () => {
     if (!isAuthenticated) {
@@ -1065,24 +1097,32 @@ export function CartPage({ onOpenAuth }) {
             </h3>
 
             {appliedCoupon ? (
-              <div className="flex items-center justify-between bg-brand-light/50 border border-brand/20 px-3 py-2 rounded-xl text-xs">
-                <div className="flex items-center gap-2 text-brand">
-                  <Tag className="w-3.5 h-3.5" />
-                  <span className="font-mono font-bold">{appliedCoupon.code}</span>
-                  <span className="text-[11px] text-text-muted">
-                    (-₹{(appliedCoupon.discountPaise / 100).toFixed(0)})
-                  </span>
+              <div className="bg-brand-light/50 border border-brand/20 px-3 py-2 rounded-xl text-xs space-y-1">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-brand">
+                    <Tag className="w-3.5 h-3.5" />
+                    <span className="font-mono font-bold">{appliedCoupon.code}</span>
+                    <span className="text-[11px] text-text-muted">
+                      (-₹{(appliedCoupon.discountPaise / 100).toFixed(0)})
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAppliedCoupon(null);
+                      setCouponInput('');
+                      setCouponError('');
+                    }}
+                    className="text-text-muted hover:text-status-error text-xs font-bold focus:outline-none cursor-pointer"
+                  >
+                    Remove
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setAppliedCoupon(null);
-                    setCouponInput('');
-                  }}
-                  className="text-text-muted hover:text-status-error text-xs font-bold focus:outline-none cursor-pointer"
-                >
-                  Remove
-                </button>
+                {appliedCoupon.applicabilityType && appliedCoupon.applicabilityType !== 'ALL_PRODUCTS' && (
+                  <p className="text-[10px] text-brand/80">
+                    Applied on qualifying {appliedCoupon.applicabilityType === 'CATEGORIES' ? 'categories' : 'products'} (₹{((appliedCoupon.eligibleSubtotalPaise || 0) / 100).toFixed(0)})
+                  </p>
+                )}
               </div>
             ) : (
               <>
@@ -1226,10 +1266,19 @@ export function CartPage({ onOpenAuth }) {
 
               <div className="flex justify-between text-text-muted">
                 <span>Delivery Charges</span>
-                <span className={isFreeDelivery ? 'text-status-success font-semibold' : 'text-text-main'}>
-                  {isFreeDelivery ? 'FREE' : `₹${(deliveryFeePaise / 100).toFixed(0)}`}
+                <span className={isFreeDelivery ? 'text-status-success font-semibold' : 'text-text-main font-mono'}>
+                  {isFreeDelivery ? 'FREE' : `₹${(effectiveDeliveryFeePaise / 100).toFixed(0)}`}
                 </span>
               </div>
+
+              {deliveryQuote?.distanceKm > 0 && deliveryQuote?.pricingSnapshot?.pricingMode === 'DISTANCE_BASED' && (
+                <div className="flex items-center justify-between text-[11px] text-text-muted">
+                  <span>Distance ({deliveryQuote.distanceKm} km):</span>
+                  <span className="font-mono text-brand font-medium">
+                    {deliveryQuote.pricingSnapshot?.matchedSlabLabel || `${deliveryQuote.distanceKm} km`}
+                  </span>
+                </div>
+              )}
 
               {/* Delivery ETA info only when serviceable */}
               {isPincodeServiceable && (

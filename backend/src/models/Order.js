@@ -133,6 +133,22 @@ const orderSchema = new mongoose.Schema(
       matchedSlabLabel: { type: String, default: '' },
       isFreeDelivery: { type: Boolean, default: false },
       estimatedDeliveryWindow: { type: String, default: '90 - 120 Minutes' },
+      pricingMode: { type: String, enum: ['STANDARD', 'DISTANCE_BASED'], default: 'STANDARD' },
+      appliedDistanceRule: {
+        fromKm: { type: Number },
+        toKm: { type: Number },
+        feePaise: { type: Number },
+        label: { type: String },
+      },
+    },
+    couponSnapshot: {
+      code: { type: String, default: '' },
+      couponId: { type: mongoose.Schema.Types.ObjectId, ref: 'Coupon', default: null },
+      discountType: { type: String, enum: ['PERCENTAGE', 'FLAT', ''], default: '' },
+      discountValue: { type: Number, default: 0 },
+      discountPaise: { type: Number, default: 0 },
+      eligibleSubtotalPaise: { type: Number, default: 0 },
+      applicabilityType: { type: String, enum: ['ALL_PRODUCTS', 'CATEGORIES', 'PRODUCTS', ''], default: '' },
     },
     payment: {
       method: {

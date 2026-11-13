@@ -36,6 +36,7 @@ import { useBulkSelection } from '../../hooks/useBulkSelection.js';
 import { BulkActionBar } from '../../components/BulkActionBar.jsx';
 import { BulkConfirmModal } from '../../components/BulkConfirmModal.jsx';
 import { SkeletonTableRow } from '../../components/skeleton/index.js';
+import { validateCoordinates } from '../../utils/coordinateValidator.js';
 
 export function AdminZones() {
   const [zones, setZones] = useState([]);
@@ -308,6 +309,24 @@ export function AdminZones() {
         return;
       }
 
+      const coordCheck = validateCoordinates({
+        lat: parseFloat(formData.centerLat),
+        lng: parseFloat(formData.centerLng),
+      });
+
+      if (!coordCheck.valid || !coordCheck.normalized) {
+        showNotification(coordCheck.error || 'Please provide valid zone center coordinates.', 'error');
+        setActionLoading(false);
+        return;
+      }
+
+      const numRadius = parseFloat(formData.radiusKm);
+      if (!Number.isFinite(numRadius) || numRadius <= 0 || numRadius > 100) {
+        showNotification('Zone coverage radius must be between 0.1 km and 100 km.', 'error');
+        setActionLoading(false);
+        return;
+      }
+
       const payload = {
         name: formData.name.trim(),
         code: formData.code.trim().toUpperCase(),
@@ -315,11 +334,8 @@ export function AdminZones() {
         city: formData.city.trim(),
         state: formData.state.trim(),
         supportedPincodes: pincodesArray,
-        center: {
-          lat: parseFloat(formData.centerLat),
-          lng: parseFloat(formData.centerLng),
-        },
-        radiusKm: parseFloat(formData.radiusKm),
+        center: coordCheck.normalized,
+        radiusKm: numRadius,
         minOrderAmountPaise: Math.round(Number(formData.minOrderRupees) * 100),
         freeDeliveryThresholdPaise: Math.round(Number(formData.freeDeliveryRupees) * 100),
         deliveryFeeBasePaise: Math.round(Number(formData.baseFeeRupees) * 100),

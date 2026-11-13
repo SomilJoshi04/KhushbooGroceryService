@@ -24,8 +24,8 @@ const checkDeliverySchema = z.object({
   city: z.string().trim().optional().default('Indore'),
   coordinates: z
     .object({
-      lat: z.number().min(-90).max(90),
-      lng: z.number().min(-180).max(180),
+      lat: z.number().finite('Latitude must be a finite number').min(-90).max(90),
+      lng: z.number().finite('Longitude must be a finite number').min(-180).max(180),
     })
     .optional(),
   subtotalPaise: z.number().int().min(0).default(0),
@@ -66,6 +66,17 @@ router.get('/config', async (req, res, next) => {
       deliveryFeeBasePaise: setting?.deliveryFeeBasePaise ?? env.DELIVERY_FEE_BASE_PAISE,
       estimatedDeliveryWindow: setting?.estimatedDeliveryWindow || '90 - 120 Minutes',
       maxDistanceKm: setting?.maxDeliveryDistanceKm ?? env.MAX_DELIVERY_DISTANCE_KM,
+      distanceBasedPricing: {
+        enabled: setting?.distanceBasedPricing?.enabled ?? false,
+        rules: (setting?.distanceBasedPricing?.rules || []).map((r) => ({
+          fromKm: r.fromKm,
+          toKm: r.toKm,
+          feePaise: r.feePaise,
+          feeRupees: (r.feePaise || 0) / 100,
+          useStandardFee: Boolean(r.useStandardFee),
+          label: r.label || `${r.fromKm}–${r.toKm} km`,
+        })),
+      },
       serviceablePincodes: Array.from(APPROVED_INDORE_PINCODES),
     });
   } catch (err) {

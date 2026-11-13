@@ -56,6 +56,7 @@ import { Pagination } from '../components/Pagination.jsx';
 import { useNotifications } from '../context/NotificationContext.jsx';
 import { SkeletonAccountPage, SkeletonOrderList, SkeletonBase, SkeletonText } from '../components/skeleton/index.js';
 import { resolveImageUrl, getApiUploadUrl } from '../config/api.js';
+import { validateCoordinates } from '../utils/coordinateValidator.js';
 
 export function AccountPage({ onOpenAuth }) {
   const {
@@ -361,6 +362,10 @@ export function AccountPage({ onOpenAuth }) {
   const [addressError, setAddressError] = useState('');
 
   const handleMapLocationSelected = (place) => {
+    if (!place) return;
+    const coordCheck = validateCoordinates(place.coordinates);
+    const validCoords = coordCheck.valid && coordCheck.normalized ? coordCheck.normalized : null;
+
     // Intelligently resolve the street/colony from reverse geocoded details
     const streetCandidate = [
       place.houseNumber,
@@ -387,7 +392,7 @@ export function AccountPage({ onOpenAuth }) {
       city: place.city || 'Indore',
       state: place.state || 'Madhya Pradesh',
       pincode: place.pincode || prev.pincode,
-      coordinates: place.coordinates || null,
+      coordinates: validCoords,
       formattedAddress: place.formattedAddress || '',
       houseNumber: place.houseNumber || '',
       locality: place.locality || '',
@@ -554,11 +559,11 @@ export function AccountPage({ onOpenAuth }) {
         isDefault: Boolean(addressForm.isDefault),
       };
 
-      if (addressForm.coordinates && typeof addressForm.coordinates.lat === 'number') {
-        payload.coordinates = {
-          lat: addressForm.coordinates.lat,
-          lng: addressForm.coordinates.lng,
-        };
+      if (addressForm.coordinates) {
+        const coordCheck = validateCoordinates(addressForm.coordinates);
+        if (coordCheck.valid && coordCheck.normalized) {
+          payload.coordinates = coordCheck.normalized;
+        }
       }
       if (addressForm.formattedAddress) {
         payload.formattedAddress = addressForm.formattedAddress.trim();

@@ -36,11 +36,18 @@ import {
   BellOff,
   Send,
   Smartphone,
+  Plus,
+  Trash2,
+  RotateCcw,
+  Info,
+  Layers,
+  ArrowRight,
 } from 'lucide-react';
 import { LocationPickerModal } from '../../components/map/LocationPickerModal.jsx';
 import { testNotificationSound } from '../../utils/soundManager.js';
 import { useNotifications } from '../../context/NotificationContext.jsx';
 import { SkeletonTitle, SkeletonText, SkeletonBase, SkeletonButton } from '../../components/skeleton/index.js';
+import { validateCoordinates } from '../../utils/coordinateValidator.js';
 
 export function AdminSettings() {
   const {
@@ -95,6 +102,14 @@ export function AdminSettings() {
   const [successMsg, setSuccessMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
 
+  const [distancePricingEnabled, setDistancePricingEnabled] = useState(false);
+  const [distanceRules, setDistanceRules] = useState([
+    { fromKm: 0, toKm: 5, feeRupees: 25, useStandardFee: true, label: '0–5 km' },
+    { fromKm: 5, toKm: 10, feeRupees: 30, useStandardFee: false, label: '5–10 km' },
+    { fromKm: 10, toKm: 15, feeRupees: 40, useStandardFee: false, label: '10–15 km' },
+  ]);
+  const [initialDistanceState, setInitialDistanceState] = useState(null);
+
   const [settings, setSettings] = useState({
     storeName: 'Khushboo Grocery Service',
     tagline: 'Indore’s Premier Fresh Grocery & Daily Essentials Store',
@@ -145,6 +160,33 @@ export function AdminSettings() {
           codEnabled: d.paymentSettings?.codEnabled ?? true,
           onlinePaymentEnabled: d.paymentSettings?.onlinePaymentEnabled ?? true,
         });
+
+        const currentBaseFee = (d.deliveryFeeBasePaise || 2500) / 100;
+        const currentMaxKm = d.maxDeliveryDistanceKm || 15;
+        const defaultRules = [
+          { fromKm: 0, toKm: 5, feeRupees: currentBaseFee, useStandardFee: true, label: '0–5 km' },
+          { fromKm: 5, toKm: 10, feeRupees: 30, useStandardFee: false, label: '5–10 km' },
+          { fromKm: 10, toKm: currentMaxKm, feeRupees: 40, useStandardFee: false, label: `10–${currentMaxKm} km` },
+        ];
+
+        const fetchedRules = (d.distanceBasedPricing?.rules && d.distanceBasedPricing.rules.length > 0)
+          ? d.distanceBasedPricing.rules.map((r) => ({
+              fromKm: r.fromKm,
+              toKm: r.toKm,
+              feeRupees: r.feeRupees !== undefined ? r.feeRupees : (r.feePaise ? r.feePaise / 100 : 0),
+              useStandardFee: Boolean(r.useStandardFee),
+              label: r.label || `${r.fromKm}–${r.toKm} km`,
+            }))
+          : defaultRules;
+
+        const isDistanceEnabled = Boolean(d.distanceBasedPricing?.enabled);
+
+        setDistancePricingEnabled(isDistanceEnabled);
+        setDistanceRules(fetchedRules);
+        setInitialDistanceState({
+          enabled: isDistanceEnabled,
+          rules: JSON.parse(JSON.stringify(fetchedRules)),
+        });
       }
     } catch (err) {
       setErrorMsg(err.message || 'Failed to load store settings.');
@@ -175,6 +217,193 @@ export function AdminSettings() {
     }
   };
 
+  const validateClientDistanceRules = (rules, maxRadiusKm, standardFee) => {
+    const errs = [];
+    if (!rules || rules.length === 0) {
+      errs.push('At least one distance rule is required.');
+      return errs;
+    }
+    const maxR = Number(maxRadiusKm) || 15;
+    if (rules[0].fromKm !== 0) {
+      errs.push(`First distance slab must start at 0 km (currently ${rules[0].fromKm} km).`);
+    }
+    for (let i = 0; i < rules.length; i++) {
+      const r = rules[i];
+      const from = Number(r.fromKm);
+      const to = Number(r.toKm);
+      const fee = r.useStandardFee ? Number(standardFee) : Number(r.feeRupees);
+
+      if (isNaN(from) || from < 0) {
+        errs.push(`Slab #${i + 1}: "From (km)" must be a positive number or zero.`);
+      }
+      if (isNaN(to) || to <= 0) {
+        errs.push(`Slab #${i + 1}: "To (km)" must be greater than 0.`);
+      } else if (to <= from) {
+        errs.push(`Slab #${i + 1}: "To (km)" (${to} km) must be strictly greater than "From (km)" (${from} km).`);
+      }
+      if (to > maxR) {
+        errs.push(`Slab #${i + 1}: "To (km)" (${to} km) cannot exceed Maximum Delivery Radius (${maxR} km).`);
+      }
+      if (isNaN(fee) || fee < 0) {
+        errs.push(`Slab #${i + 1}: Delivery fee cannot be negative.`);
+      }
+      if (i > 0) {
+        const prev = rules[i - 1];
+        const prevTo = Number(prev.toKm);
+        if (from < prevTo) {
+          errs.push(`Overlapping slabs detected: Slab #${i} ends at ${prevTo} km, but Slab #${i + 1} begins at ${from} km.`);
+        } else if (from > prevTo) {
+          errs.push(`Coverage gap between Slab #${i} and #${i + 1}: Missing interval between ${prevTo} km and ${from} km.`);
+        }
+      }
+    }
+    const last = rules[rules.length - 1];
+    if (last && Number(last.toKm) !== maxR) {
+      errs.push(`Final slab must end exactly at Maximum Delivery Radius (${maxR} km). Currently ends at ${last.toKm} km.`);
+    }
+    return errs;
+  };
+
+  const handleAddSlab = () => {
+    const maxR = Number(settings.maxDeliveryDistanceKm) || 15;
+    const lastRule = distanceRules[distanceRules.length - 1];
+    const lastTo = lastRule ? Number(lastRule.toKm) : 0;
+
+    if (lastTo >= maxR) {
+      if (distanceRules.length > 0 && lastRule.fromKm < maxR - 1) {
+        const splitPoint = Math.round(((lastRule.fromKm + maxR) / 2) * 10) / 10;
+        const updated = [...distanceRules];
+        updated[updated.length - 1] = {
+          ...lastRule,
+          toKm: splitPoint,
+          label: `${lastRule.fromKm}–${splitPoint} km`,
+        };
+        updated.push({
+          fromKm: splitPoint,
+          toKm: maxR,
+          feeRupees: Number(lastRule.feeRupees) + 10,
+          useStandardFee: false,
+          label: `${splitPoint}–${maxR} km`,
+        });
+        setDistanceRules(updated);
+        return;
+      }
+    }
+
+    const newFrom = lastTo;
+    const newTo = Math.min(maxR, newFrom + 5);
+    const newFee = lastRule ? Number(lastRule.feeRupees) + 10 : 30;
+
+    setDistanceRules([
+      ...distanceRules,
+      {
+        fromKm: newFrom,
+        toKm: newTo,
+        feeRupees: newFee,
+        useStandardFee: false,
+        label: `${newFrom}–${newTo} km`,
+      },
+    ]);
+  };
+
+  const handleRemoveSlab = (indexToRemove) => {
+    if (distanceRules.length <= 1) return;
+    const updated = distanceRules.filter((_, idx) => idx !== indexToRemove);
+
+    for (let i = 0; i < updated.length; i++) {
+      if (i === 0) {
+        updated[i].fromKm = 0;
+      } else {
+        updated[i].fromKm = updated[i - 1].toKm;
+      }
+      updated[i].label = `${updated[i].fromKm}–${updated[i].toKm} km`;
+    }
+    setDistanceRules(updated);
+  };
+
+  const handleUpdateSlab = (index, field, value) => {
+    const updated = distanceRules.map((rule, idx) => {
+      if (idx !== index) return rule;
+      const modified = { ...rule };
+    if (field === 'toKm') {
+        // Enforce integer km values — delivery distance slabs use whole-kilometre boundaries.
+        // Rounding to 1 decimal (×10/10) caused browser step-validation conflicts when the
+        // stored value (e.g. 4.6) didn't align with the input step, producing confusing
+        // "valid values are X and Y" browser tooltips on the spinner arrows.
+        const numVal = Math.max(0, Math.round(Number(value)));
+        modified.toKm = numVal;
+        modified.label = `${modified.fromKm}–${numVal} km`;
+      } else if (field === 'useStandardFee') {
+        modified.useStandardFee = Boolean(value);
+        if (modified.useStandardFee) {
+          modified.feeRupees = Number(settings.deliveryFeeBaseRupees);
+        }
+      } else if (field === 'feeRupees') {
+        modified.feeRupees = Math.max(0, Math.round(Number(value)));
+      }
+      return modified;
+    });
+
+    if (field === 'toKm' && index < updated.length - 1) {
+      updated[index + 1].fromKm = updated[index].toKm;
+      updated[index + 1].label = `${updated[index + 1].fromKm}–${updated[index + 1].toKm} km`;
+    }
+
+    setDistanceRules(updated);
+  };
+
+  const handleSyncFinalSlabToMaxRadius = () => {
+    const maxR = Number(settings.maxDeliveryDistanceKm) || 15;
+    if (distanceRules.length === 0) return;
+    const updated = [...distanceRules];
+    const last = updated[updated.length - 1];
+    updated[updated.length - 1] = {
+      ...last,
+      toKm: maxR,
+      label: `${last.fromKm}–${maxR} km`,
+    };
+    setDistanceRules(updated);
+  };
+
+  const handleResetToDefaultSlabs = () => {
+    const maxR = Number(settings.maxDeliveryDistanceKm) || 15;
+    const baseFee = Number(settings.deliveryFeeBaseRupees) || 25;
+    if (maxR <= 5) {
+      setDistanceRules([
+        { fromKm: 0, toKm: maxR, feeRupees: baseFee, useStandardFee: true, label: `0–${maxR} km` },
+      ]);
+    } else if (maxR <= 10) {
+      setDistanceRules([
+        { fromKm: 0, toKm: 5, feeRupees: baseFee, useStandardFee: true, label: '0–5 km' },
+        { fromKm: 5, toKm: maxR, feeRupees: 30, useStandardFee: false, label: `5–${maxR} km` },
+      ]);
+    } else {
+      setDistanceRules([
+        { fromKm: 0, toKm: 5, feeRupees: baseFee, useStandardFee: true, label: '0–5 km' },
+        { fromKm: 5, toKm: 10, feeRupees: 30, useStandardFee: false, label: '5–10 km' },
+        { fromKm: 10, toKm: maxR, feeRupees: 40, useStandardFee: false, label: `10–${maxR} km` },
+      ]);
+    }
+  };
+
+  const handleRevertDistance = () => {
+    if (initialDistanceState) {
+      setDistancePricingEnabled(initialDistanceState.enabled);
+      setDistanceRules(JSON.parse(JSON.stringify(initialDistanceState.rules)));
+    }
+  };
+
+  const liveValidationErrors = validateClientDistanceRules(
+    distanceRules,
+    settings.maxDeliveryDistanceKm,
+    settings.deliveryFeeBaseRupees
+  );
+
+  const isDistanceDirty =
+    initialDistanceState &&
+    (initialDistanceState.enabled !== distancePricingEnabled ||
+      JSON.stringify(initialDistanceState.rules) !== JSON.stringify(distanceRules));
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setSaving(true);
@@ -186,6 +415,20 @@ export function AdminSettings() {
       setErrorMsg('At least one payment method (Cash on Delivery or Online Payment) must remain enabled.');
       setSaving(false);
       return;
+    }
+
+    // Distance pricing client validation
+    if (distancePricingEnabled) {
+      const distanceErrs = validateClientDistanceRules(
+        distanceRules,
+        settings.maxDeliveryDistanceKm,
+        settings.deliveryFeeBaseRupees
+      );
+      if (distanceErrs.length > 0) {
+        setErrorMsg(`Distance Pricing Validation Error: ${distanceErrs[0]}`);
+        setSaving(false);
+        return;
+      }
     }
 
     try {
@@ -213,11 +456,26 @@ export function AdminSettings() {
           codEnabled: settings.codEnabled,
           onlinePaymentEnabled: settings.onlinePaymentEnabled,
         },
+        distanceBasedPricing: {
+          enabled: distancePricingEnabled,
+          rules: distanceRules.map((r) => ({
+            fromKm: Number(r.fromKm),
+            toKm: Number(r.toKm),
+            feeRupees: r.useStandardFee ? Number(settings.deliveryFeeBaseRupees) : Number(r.feeRupees),
+            feePaise: Math.round((r.useStandardFee ? Number(settings.deliveryFeeBaseRupees) : Number(r.feeRupees)) * 100),
+            useStandardFee: Boolean(r.useStandardFee),
+            label: `${r.fromKm}–${r.toKm} km`,
+          })),
+        },
       };
 
       const res = await apiClient.put('/v1/admin/settings', payload);
       if (res.data?.success) {
-        setSuccessMsg('Storefront, notification sound & payment settings updated successfully.');
+        setInitialDistanceState({
+          enabled: distancePricingEnabled,
+          rules: JSON.parse(JSON.stringify(distanceRules)),
+        });
+        setSuccessMsg('Storefront, distance pricing & payment settings updated successfully.');
         window.dispatchEvent(new CustomEvent('khushboo:settings_updated'));
         setTimeout(() => setSuccessMsg(''), 5000);
       }
@@ -714,6 +972,346 @@ export function AdminSettings() {
               <span className="text-[10px] text-text-muted block mt-1">Customer delivery timeframe display.</span>
             </div>
           </div>
+
+          {/* Distance-Based Delivery Pricing Section */}
+          <div className="pt-4 border-t border-border-neutral space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 bg-surface-subtle rounded-xl border border-border-neutral">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <Layers className="w-4 h-4 text-brand" />
+                  <span className="text-xs font-bold text-text-main">Distance-Based Delivery Pricing</span>
+                  <span
+                    className={`px-2 py-0.5 text-[10px] font-bold rounded-full ${
+                      distancePricingEnabled
+                        ? 'bg-emerald-100 text-status-success'
+                        : 'bg-zinc-200 text-text-muted'
+                    }`}
+                  >
+                    {distancePricingEnabled ? 'Active (Distance Slabs)' : 'Disabled (Flat Standard Fee)'}
+                  </span>
+                </div>
+                <p className="text-[11px] text-text-muted max-w-2xl">
+                  Dynamically charges delivery fees based on authoritative road distance from the Geeta Bhawan store hub.
+                  When disabled, the flat Standard Delivery Fee (₹{settings.deliveryFeeBaseRupees}) applies to all eligible deliveries.
+                  Orders reaching the Free Delivery Threshold (₹{settings.freeDeliveryThresholdRupees}) always receive 100% free delivery.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setDistancePricingEnabled(!distancePricingEnabled)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition shadow-xs shrink-0 cursor-pointer ${
+                  distancePricingEnabled
+                    ? 'bg-emerald-50 text-status-success border-emerald-200 hover:bg-emerald-100'
+                    : 'bg-zinc-100 text-text-muted border-zinc-200 hover:bg-zinc-200'
+                }`}
+              >
+                {distancePricingEnabled ? (
+                  <>
+                    <ToggleRight className="w-4 h-4 text-status-success" />
+                    <span>Enabled</span>
+                  </>
+                ) : (
+                  <>
+                    <ToggleLeft className="w-4 h-4 text-text-muted" />
+                    <span>Disabled</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            {/* Slabs Configuration Container */}
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-text-main">Distance Slabs & Rates</span>
+                  <span className="text-[10px] text-text-muted bg-surface-subtle px-2 py-0.5 rounded-md border border-border-neutral">
+                    {distanceRules.length} {distanceRules.length === 1 ? 'slab' : 'slabs'} defined
+                  </span>
+                  {isDistanceDirty && (
+                    <span className="text-[10px] font-medium text-amber-800 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">
+                      Unsaved changes
+                    </span>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleAddSlab}
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-brand text-white hover:bg-brand-hover transition shadow-xs cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Add Distance Slab</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleResetToDefaultSlabs}
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-surface border border-border-neutral text-text-muted hover:text-text-main hover:bg-surface-subtle transition cursor-pointer"
+                    title="Reset to 0-5km Standard, 5-10km ₹30, 10-15km ₹40"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>Reset Defaults</span>
+                  </button>
+
+                  {isDistanceDirty && (
+                    <button
+                      type="button"
+                      onClick={handleRevertDistance}
+                      className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-zinc-100 border border-zinc-200 text-zinc-600 hover:bg-zinc-200 transition cursor-pointer"
+                      title="Discard unsaved slab changes"
+                    >
+                      <span>Discard</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Desktop Table View */}
+              <div className="hidden md:block overflow-hidden rounded-xl border border-border-neutral">
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className="bg-surface-subtle border-b border-border-neutral text-text-muted uppercase text-[10px] font-semibold tracking-wider">
+                      <th className="py-2.5 px-3">Slab</th>
+                      <th className="py-2.5 px-3">From (km)</th>
+                      <th className="py-2.5 px-3">To (km)</th>
+                      <th className="py-2.5 px-3">Boundary Logic</th>
+                      <th className="py-2.5 px-3">Delivery Fee</th>
+                      <th className="py-2.5 px-3 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border-neutral bg-surface">
+                    {distanceRules.map((rule, idx) => {
+                      const isLast = idx === distanceRules.length - 1;
+                      return (
+                        <tr key={idx} className="hover:bg-surface-subtle/50 transition">
+                          <td className="py-3 px-3 font-semibold text-text-main">
+                            <span className="bg-brand-light text-brand px-2 py-0.5 rounded text-[11px] font-mono font-bold">
+                              #{idx + 1}
+                            </span>
+                          </td>
+
+                          {/* From km */}
+                          <td className="py-3 px-3">
+                            <div className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-surface-subtle border border-border-neutral font-mono font-bold text-text-main">
+                              <span>{rule.fromKm}</span>
+                              <span className="text-text-muted text-[10px]">km</span>
+                            </div>
+                          </td>
+
+                          {/* To km */}
+                          <td className="py-3 px-3">
+                            <div className="flex items-center gap-1.5">
+                              <input
+                                type="number"
+                                step="1"
+                                min="1"
+                                max={settings.maxDeliveryDistanceKm}
+                                value={rule.toKm}
+                                onChange={(e) => handleUpdateSlab(idx, 'toKm', e.target.value)}
+                                className="w-24 bg-primary-bg border border-border-neutral rounded-lg px-2.5 py-1 text-xs font-mono text-text-main focus:outline-none focus:border-brand focus:ring-1 focus:ring-brand"
+                              />
+                              <span className="text-text-muted text-xs font-mono">km</span>
+                            </div>
+                          </td>
+
+                          {/* Boundary Logic */}
+                          <td className="py-3 px-3">
+                            {isLast ? (
+                              <div className="inline-flex items-center gap-1 font-mono text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-md border border-emerald-200">
+                                <span>[{rule.fromKm}, {rule.toKm}] km</span>
+                                <span className="text-[10px] font-sans font-normal">(Terminal)</span>
+                              </div>
+                            ) : (
+                              <div className="inline-flex items-center gap-1 font-mono text-[11px] font-medium text-text-muted bg-surface-subtle px-2.5 py-1 rounded-md border border-border-neutral">
+                                <span>[{rule.fromKm}, {rule.toKm}) km</span>
+                                <span className="text-[10px] font-sans">(Half-open)</span>
+                              </div>
+                            )}
+                          </td>
+
+                          {/* Delivery Fee */}
+                          <td className="py-3 px-3">
+                            <div className="flex items-center gap-3">
+                              <label className="flex items-center gap-1.5 cursor-pointer select-none text-[11px] text-text-muted hover:text-text-main">
+                                <input
+                                  type="checkbox"
+                                  checked={rule.useStandardFee}
+                                  onChange={(e) => handleUpdateSlab(idx, 'useStandardFee', e.target.checked)}
+                                  className="rounded border-border-neutral text-brand focus:ring-brand cursor-pointer"
+                                />
+                                <span>Standard Fee</span>
+                              </label>
+
+                              {rule.useStandardFee ? (
+                                <span className="font-mono font-bold text-xs text-text-main bg-brand-light px-2.5 py-1 rounded-md border border-brand/20">
+                                  ₹{settings.deliveryFeeBaseRupees}
+                                </span>
+                              ) : (
+                                <div className="flex items-center gap-1">
+                                  <span className="text-text-muted font-semibold text-xs">₹</span>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    value={rule.feeRupees}
+                                    onChange={(e) => handleUpdateSlab(idx, 'feeRupees', e.target.value)}
+                                    className="w-20 bg-primary-bg border border-border-neutral rounded-lg px-2.5 py-1 text-xs font-mono font-semibold text-text-main focus:outline-none focus:border-brand focus:ring-1 focus:ring-brand"
+                                  />
+                                </div>
+                              )}
+                            </div>
+                          </td>
+
+                          {/* Actions */}
+                          <td className="py-3 px-3 text-right">
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveSlab(idx)}
+                              disabled={distanceRules.length <= 1}
+                              className="p-1.5 rounded-lg text-status-error hover:bg-red-50 disabled:opacity-30 disabled:hover:bg-transparent transition cursor-pointer"
+                              title={distanceRules.length <= 1 ? 'At least one slab required' : 'Delete distance slab'}
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Mobile Cards View */}
+              <div className="md:hidden space-y-3">
+                {distanceRules.map((rule, idx) => {
+                  const isLast = idx === distanceRules.length - 1;
+                  return (
+                    <div
+                      key={idx}
+                      className="p-3.5 bg-surface rounded-xl border border-border-neutral shadow-xs space-y-3"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="bg-brand-light text-brand px-2 py-0.5 rounded text-[11px] font-mono font-bold">
+                            Slab #{idx + 1}
+                          </span>
+                          <span className="font-mono text-xs font-semibold text-text-main">
+                            {rule.fromKm} to {rule.toKm} km
+                          </span>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveSlab(idx)}
+                          disabled={distanceRules.length <= 1}
+                          className="p-1.5 rounded-lg text-status-error hover:bg-red-50 disabled:opacity-30 transition"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2 text-xs">
+                        <div>
+                          <label className="block text-[10px] text-text-muted font-semibold mb-1">From (km)</label>
+                          <div className="px-2.5 py-1.5 bg-surface-subtle border border-border-neutral rounded-lg font-mono font-bold text-text-main">
+                            {rule.fromKm} km
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="block text-[10px] text-text-muted font-semibold mb-1">To (km)</label>
+                          <input
+                            type="number"
+                            step="1"
+                            min="1"
+                            max={settings.maxDeliveryDistanceKm}
+                            value={rule.toKm}
+                            onChange={(e) => handleUpdateSlab(idx, 'toKm', e.target.value)}
+                            className="w-full bg-primary-bg border border-border-neutral rounded-lg px-2.5 py-1.5 text-xs font-mono text-text-main"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between pt-1 border-t border-border-neutral">
+                        <label className="flex items-center gap-1.5 text-xs text-text-muted cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={rule.useStandardFee}
+                            onChange={(e) => handleUpdateSlab(idx, 'useStandardFee', e.target.checked)}
+                            className="rounded border-border-neutral text-brand"
+                          />
+                          <span>Use Standard Fee</span>
+                        </label>
+
+                        {rule.useStandardFee ? (
+                          <span className="font-mono font-bold text-xs text-text-main bg-brand-light px-2.5 py-1 rounded-md">
+                            ₹{settings.deliveryFeeBaseRupees}
+                          </span>
+                        ) : (
+                          <div className="flex items-center gap-1">
+                            <span className="text-text-muted text-xs font-semibold">₹</span>
+                            <input
+                              type="number"
+                              min="0"
+                              value={rule.feeRupees}
+                              onChange={(e) => handleUpdateSlab(idx, 'feeRupees', e.target.value)}
+                              className="w-20 bg-primary-bg border border-border-neutral rounded-lg px-2 py-1 text-xs font-mono font-semibold text-text-main"
+                            />
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="text-[10px] font-mono text-text-muted bg-surface-subtle px-2 py-1 rounded">
+                        Interval: {isLast ? `[${rule.fromKm}, ${rule.toKm}] km (Terminal)` : `[${rule.fromKm}, ${rule.toKm}) km`}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Boundary Logic Reference Callout */}
+              <div className="p-3 bg-surface-subtle border border-border-neutral rounded-xl text-[11px] text-text-muted space-y-1">
+                <div className="flex items-center gap-1.5 font-semibold text-text-main">
+                  <Info className="w-3.5 h-3.5 text-brand shrink-0" />
+                  <span>Boundary Behavior & Rounding Reference:</span>
+                </div>
+                <p>
+                  Intermediate distance slabs use half-open intervals <code className="font-mono text-brand font-semibold">[from, to)</code>: a customer at 4.99 km pays the 0–5 km fee, while exactly 5.00 km transitions into the 5–10 km slab.
+                  The terminal slab <code className="font-mono text-brand font-semibold">[{distanceRules[distanceRules.length - 1]?.fromKm || 10}, {settings.maxDeliveryDistanceKm}] km</code> is closed and inclusive up to the configured Maximum Delivery Radius ({settings.maxDeliveryDistanceKm} km). Orders beyond {settings.maxDeliveryDistanceKm} km are marked unserviceable.
+                </p>
+              </div>
+
+              {/* Live Validation Warnings */}
+              {liveValidationErrors.length > 0 && (
+                <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-xs space-y-2 animate-fadeIn">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 font-bold">
+                      <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                      <span>Configuration Warnings ({liveValidationErrors.length})</span>
+                    </div>
+
+                    {distanceRules.length > 0 &&
+                      Number(distanceRules[distanceRules.length - 1].toKm) !== Number(settings.maxDeliveryDistanceKm) && (
+                        <button
+                          type="button"
+                          onClick={handleSyncFinalSlabToMaxRadius}
+                          className="px-2.5 py-1 rounded-lg bg-amber-200/80 hover:bg-amber-200 text-amber-900 font-semibold text-[11px] transition cursor-pointer"
+                        >
+                          Auto-extend final slab to {settings.maxDeliveryDistanceKm} km
+                        </button>
+                      )}
+                  </div>
+
+                  <ul className="list-disc pl-5 space-y-1 text-[11px]">
+                    {liveValidationErrors.map((err, i) => (
+                      <li key={i}>{err}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
 
         {/* Business & Contact Details Card */}
@@ -826,12 +1424,16 @@ export function AdminSettings() {
         onClose={() => setMapModalOpen(false)}
         initialCoordinates={settings.dispatchCoordinates}
         onLocationSelect={(place) => {
+          if (!place) return;
+          const coordCheck = validateCoordinates(place.coordinates);
+          if (!coordCheck.valid || !coordCheck.normalized) return;
+
           setSettings((prev) => ({
             ...prev,
             address: place.formattedAddress || prev.address,
             serviceCity: place.city || prev.serviceCity,
             servicePincode: place.pincode || prev.servicePincode,
-            dispatchCoordinates: place.coordinates,
+            dispatchCoordinates: coordCheck.normalized,
           }));
         }}
         title="Set Store Central Dispatch Hub"

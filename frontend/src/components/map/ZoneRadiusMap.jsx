@@ -1,14 +1,14 @@
 /**
- * Interactive Zone Radius Map Component with Automatic Location Geocoding.
+ * Interactive Zone Radius Map Component with Multi-Provider Support (Google Maps Platform & Leaflet).
  *
  * Implements:
- * - Search bar with 350ms debouncing and suggestion dropdown.
- * - Draggable Leaflet pin and map click selection.
- * - Automatic reverse geocoding on drag/click/selection.
- * - Request cancellation (AbortController) to prevent stale geocoding responses.
- * - Coverage circle synchronized with radius slider.
- * - Loading indicator and visible error state (never fabricated values).
- * - Notifies parent component of location details and resolving status.
+ * - Dynamic provider rendering: Google Maps JS SDK or Leaflet OSM fallback.
+ * - Draggable zone center marker and interactive map-click positioning.
+ * - Dynamic coverage circle synchronized with radiusKm (validated: positive, finite, <= 100 km).
+ * - Debounced search places bar (350ms) with request cancellation (AbortController).
+ * - Reverse-geocode race-condition protection via sequence counter.
+ * - Operating region boundary detection with visual indicators.
+ * - Zero fabricated addresses when reverse geocode fails.
  *
  * @module components/map/ZoneRadiusMap
  */
@@ -16,7 +16,15 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import L from 'leaflet';
 import { Search, Loader2, MapPin, AlertCircle, CheckCircle2, Navigation } from 'lucide-react';
-import { searchPlaces, reverseGeocode, isWithinOperatingRegion } from '../../services/mapProvider.js';
+import {
+  searchPlaces,
+  reverseGeocode,
+  isWithinOperatingRegion,
+  getActiveProvider,
+  loadGoogleMapsSDK,
+  DEFAULT_MAP_CENTER,
+} from '../../services/mapProvider.js';
+import { validateCoordinates } from '../../utils/coordinateValidator.js';
 
 export function ZoneRadiusMap({
   center = { lat: 22.7196, lng: 75.8577 },
@@ -28,11 +36,16 @@ export function ZoneRadiusMap({
   showSearchBar = true,
 }) {
   const containerRef = useRef(null);
-  const mapRef = useRef(null);
-  const markerRef = useRef(null);
-  const circleRef = useRef(null);
-  const abortControllerRef = useRef(null);
+  const leafletMapRef = useRef(null);
+  const leafletMarkerRef = useRef(null);
+  const leafletCircleRef = useRef(null);
+  const googleMapRef = useRef(null);
+  const googleMarkerRef = useRef(null);
+  const googleCircleRef = useRef(null);
+
+  const reverseAbortRef = useRef(null);
   const searchAbortRef = useRef(null);
+  const activeReverseSeqRef = useRef(0);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [suggestions, setSuggestions] = useState([]);
@@ -41,6 +54,16 @@ export function ZoneRadiusMap({
   const [errorMessage, setErrorMessage] = useState('');
   const [currentAddressSummary, setCurrentAddressSummary] = useState('');
   const [regionNotice, setRegionNotice] = useState('');
+
+  // Validate center coordinates safely
+  const coordCheck = validateCoordinates(center);
+  const safeLat = coordCheck.valid && coordCheck.normalized ? coordCheck.normalized.lat : DEFAULT_MAP_CENTER.lat;
+  const safeLng = coordCheck.valid && coordCheck.normalized ? coordCheck.normalized.lng : DEFAULT_MAP_CENTER.lng;
+
+  // Validate radius safely (0.1 to 100 km)
+  const numRadius = Number(radiusKm);
+  const safeRadiusKm = Number.isFinite(numRadius) && numRadius > 0 && numRadius <= 100 ? numRadius : 5.0;
+  const safeRadiusMeters = safeRadiusKm * 1000;
 
   // Notify parent of resolving state
   const notifyResolving = useCallback(
@@ -51,13 +74,14 @@ export function ZoneRadiusMap({
     [onResolvingStateChange]
   );
 
-  // Perform reverse geocoding with stale request cancellation
+  // Perform reverse geocoding with race condition sequencing
   const resolveCoordinates = useCallback(
     async (lat, lng) => {
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
+      const currentSeq = ++activeReverseSeqRef.current;
+      if (reverseAbortRef.current) {
+        reverseAbortRef.current.abort();
       }
-      abortControllerRef.current = new AbortController();
+      reverseAbortRef.current = new AbortController();
 
       notifyResolving(true);
       setErrorMessage('');
@@ -67,18 +91,18 @@ export function ZoneRadiusMap({
       setRegionNotice(regionCheck.inOperatingRegion ? '' : regionCheck.message);
 
       try {
-        const details = await reverseGeocode(lat, lng, abortControllerRef.current.signal);
-        if (!details) return; // Aborted
+        const details = await reverseGeocode(lat, lng, reverseAbortRef.current.signal);
+        // Ignore stale responses
+        if (currentSeq !== activeReverseSeqRef.current || !details) return;
 
         setCurrentAddressSummary(details.formattedAddress || `${details.locality}, ${details.city}`);
         if (onLocationResolved) {
           onLocationResolved(details);
         }
       } catch (err) {
-        if (err.name !== 'AbortError') {
+        if (err.name !== 'AbortError' && currentSeq === activeReverseSeqRef.current) {
           const msg = err.message || 'Unable to resolve address for this location.';
           setErrorMessage(msg);
-          // Pass coordinate-only data on error without fabricated values
           if (onLocationResolved) {
             onLocationResolved({
               success: false,
@@ -88,108 +112,193 @@ export function ZoneRadiusMap({
           }
         }
       } finally {
-        notifyResolving(false);
+        if (currentSeq === activeReverseSeqRef.current) {
+          notifyResolving(false);
+        }
       }
     },
     [notifyResolving, onLocationResolved]
   );
 
-  // Initialize Leaflet Map
+  // Reposition across active map provider
+  const setMapCenterAndCircle = (lat, lng, radiusM) => {
+    if (googleMapRef.current && googleMarkerRef.current && googleCircleRef.current) {
+      const pos = { lat, lng };
+      googleMapRef.current.setCenter(pos);
+      googleMarkerRef.current.setPosition(pos);
+      googleCircleRef.current.setCenter(pos);
+      if (radiusM) googleCircleRef.current.setRadius(radiusM);
+    } else if (leafletMapRef.current && leafletMarkerRef.current && leafletCircleRef.current) {
+      leafletMapRef.current.setView([lat, lng], leafletMapRef.current.getZoom() || 13, { animate: true });
+      leafletMarkerRef.current.setLatLng([lat, lng]);
+      leafletCircleRef.current.setLatLng([lat, lng]);
+      if (radiusM) leafletCircleRef.current.setRadius(radiusM);
+    }
+  };
+
+  // Cleanup map instances
+  const destroyCurrentMap = () => {
+    if (leafletMapRef.current) {
+      leafletMapRef.current.remove();
+      leafletMapRef.current = null;
+      leafletMarkerRef.current = null;
+      leafletCircleRef.current = null;
+    }
+    if (googleMarkerRef.current) googleMarkerRef.current.setMap(null);
+    if (googleCircleRef.current) googleCircleRef.current.setMap(null);
+    googleMapRef.current = null;
+  };
+
+  // Initialize Map
   useEffect(() => {
     if (!containerRef.current) return;
+    let isCancelled = false;
 
-    if (mapRef.current) {
-      mapRef.current.remove();
-      mapRef.current = null;
-    }
+    const timer = setTimeout(async () => {
+      if (!containerRef.current || isCancelled) return;
+      destroyCurrentMap();
 
-    const initialLat = center?.lat || 22.7196;
-    const initialLng = center?.lng || 75.8577;
+      const provider = getActiveProvider();
 
-    const map = L.map(containerRef.current, {
-      center: [initialLat, initialLng],
-      zoom: 12,
-      zoomControl: interactive,
-      dragging: interactive,
-      scrollWheelZoom: false,
-    });
+      if (provider === 'google') {
+        try {
+          const maps = await loadGoogleMapsSDK();
+          if (isCancelled || !containerRef.current) return;
 
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '&copy; OpenStreetMap contributors',
-      maxZoom: 18,
-    }).addTo(map);
+          const map = new maps.Map(containerRef.current, {
+            center: { lat: safeLat, lng: safeLng },
+            zoom: 12,
+            mapTypeControl: false,
+            streetViewControl: false,
+            fullscreenControl: false,
+            gestureHandling: interactive ? 'greedy' : 'none',
+          });
 
-    const svgIcon = L.divIcon({
-      html: `
-        <div style="filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3));">
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="34" height="34" fill="#245C43">
-            <path d="M12 0C7.58 0 4 3.58 4 8c0 5.25 7.15 14.33 7.45 14.72a.75.75 0 0 0 1.1 0C12.85 22.33 20 13.25 20 8c0-4.42-3.58-8-8-8zm0 11.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z"/>
-          </svg>
-        </div>
-      `,
-      className: 'khushboo-zone-pin',
-      iconSize: [34, 34],
-      iconAnchor: [17, 34],
-    });
+          const marker = new maps.Marker({
+            position: { lat: safeLat, lng: safeLng },
+            map,
+            draggable: interactive,
+            title: 'Zone Center Hub',
+          });
 
-    const marker = L.marker([initialLat, initialLng], {
-      icon: svgIcon,
-      draggable: interactive,
-    }).addTo(map);
+          const circle = new maps.Circle({
+            map,
+            center: { lat: safeLat, lng: safeLng },
+            radius: safeRadiusMeters,
+            strokeColor: '#245C43',
+            strokeOpacity: 0.8,
+            strokeWeight: 2,
+            fillColor: '#245C43',
+            fillOpacity: 0.15,
+          });
 
-    const radiusMeters = (Number(radiusKm) || 5.0) * 1000;
-    const circle = L.circle([initialLat, initialLng], {
-      radius: radiusMeters,
-      color: '#245C43',
-      weight: 2,
-      fillColor: '#DCE8DC',
-      fillOpacity: 0.35,
-    }).addTo(map);
+          if (interactive) {
+            marker.addListener('dragend', () => {
+              const pos = marker.getPosition();
+              if (pos) {
+                circle.setCenter(pos);
+                resolveCoordinates(pos.lat(), pos.lng());
+              }
+            });
 
-    if (interactive) {
-      marker.on('dragend', () => {
-        const pos = marker.getLatLng();
-        circle.setLatLng(pos);
-        resolveCoordinates(pos.lat, pos.lng);
+            map.addListener('click', (e) => {
+              if (e.latLng) {
+                marker.setPosition(e.latLng);
+                circle.setCenter(e.latLng);
+                resolveCoordinates(e.latLng.lat(), e.latLng.lng());
+              }
+            });
+          }
+
+          googleMapRef.current = map;
+          googleMarkerRef.current = marker;
+          googleCircleRef.current = circle;
+          return;
+        } catch (sdkErr) {
+          console.warn('[ZoneRadiusMap] Google Maps failed to load, falling back to Leaflet:', sdkErr.message);
+          // Fall through to Leaflet initialization
+        }
+      }
+
+      // Leaflet Initialization
+      if (isCancelled || !containerRef.current) return;
+
+      const map = L.map(containerRef.current, {
+        center: [safeLat, safeLng],
+        zoom: 12,
+        zoomControl: interactive,
+        dragging: interactive,
+        scrollWheelZoom: false,
       });
 
-      map.on('click', (e) => {
-        marker.setLatLng(e.latlng);
-        circle.setLatLng(e.latlng);
-        resolveCoordinates(e.latlng.lat, e.latlng.lng);
-      });
-    }
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap contributors',
+        maxZoom: 18,
+      }).addTo(map);
 
-    mapRef.current = map;
-    markerRef.current = marker;
-    circleRef.current = circle;
+      const svgIcon = L.divIcon({
+        html: `
+          <div style="filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3));">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="34" height="34" fill="#245C43">
+              <path d="M12 0C7.58 0 4 3.58 4 8c0 5.25 7.15 14.33 7.45 14.72a.75.75 0 0 0 1.1 0C12.85 22.33 20 13.25 20 8c0-4.42-3.58-8-8-8zm0 11.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z"/>
+            </svg>
+          </div>
+        `,
+        className: 'khushboo-zone-pin',
+        iconSize: [34, 34],
+        iconAnchor: [17, 34],
+      });
+
+      const marker = L.marker([safeLat, safeLng], {
+        icon: svgIcon,
+        draggable: interactive,
+      }).addTo(map);
+
+      const circle = L.circle([safeLat, safeLng], {
+        radius: safeRadiusMeters,
+        color: '#245C43',
+        weight: 2,
+        fillColor: '#DCE8DC',
+        fillOpacity: 0.35,
+      }).addTo(map);
+
+      if (interactive) {
+        marker.on('dragend', () => {
+          const pos = marker.getLatLng();
+          circle.setLatLng(pos);
+          resolveCoordinates(pos.lat, pos.lng);
+        });
+
+        map.on('click', (e) => {
+          marker.setLatLng(e.latlng);
+          circle.setLatLng(e.latlng);
+          resolveCoordinates(e.latlng.lat, e.latlng.lng);
+        });
+      }
+
+      leafletMapRef.current = map;
+      leafletMarkerRef.current = marker;
+      leafletCircleRef.current = circle;
+    }, 150);
 
     return () => {
-      if (abortControllerRef.current) abortControllerRef.current.abort();
+      isCancelled = true;
+      clearTimeout(timer);
+      if (reverseAbortRef.current) reverseAbortRef.current.abort();
       if (searchAbortRef.current) searchAbortRef.current.abort();
-      if (mapRef.current) {
-        mapRef.current.remove();
-        mapRef.current = null;
-      }
+      destroyCurrentMap();
     };
   }, []);
 
   // Update center and circle radius when props change
   useEffect(() => {
-    if (!mapRef.current || !markerRef.current || !circleRef.current) return;
+    setMapCenterAndCircle(safeLat, safeLng, safeRadiusMeters);
+  }, [safeLat, safeLng, safeRadiusMeters]);
 
-    const lat = center?.lat || 22.7196;
-    const lng = center?.lng || 75.8577;
-    const radiusMeters = (Number(radiusKm) || 5.0) * 1000;
-
-    markerRef.current.setLatLng([lat, lng]);
-    circleRef.current.setLatLng([lat, lng]);
-    circleRef.current.setRadius(radiusMeters);
-  }, [center?.lat, center?.lng, radiusKm]);
-
-  // Debounced search places handler
+  // Debounced search autocomplete
   useEffect(() => {
-    if (!searchQuery || searchQuery.trim().length < 2) {
+    const clean = searchQuery.trim();
+    if (!clean || clean.length < 2) {
       setSuggestions([]);
       return;
     }
@@ -200,7 +309,7 @@ export function ZoneRadiusMap({
 
       setIsSearching(true);
       try {
-        const results = await searchPlaces(searchQuery, searchAbortRef.current.signal);
+        const results = await searchPlaces(clean, searchAbortRef.current.signal);
         setSuggestions(results);
       } catch (err) {
         if (err.name !== 'AbortError') {
@@ -216,17 +325,16 @@ export function ZoneRadiusMap({
 
   // Handle suggestion click
   const handleSelectSuggestion = (place) => {
+    if (!place?.coordinates) return;
     const { lat, lng } = place.coordinates;
+    const check = validateCoordinates({ lat, lng });
+    if (!check.valid || !check.normalized) return;
+
     setSearchQuery(place.name || place.formattedAddress);
     setSuggestions([]);
 
-    if (mapRef.current && markerRef.current && circleRef.current) {
-      mapRef.current.flyTo([lat, lng], 13, { duration: 0.8 });
-      markerRef.current.setLatLng([lat, lng]);
-      circleRef.current.setLatLng([lat, lng]);
-    }
-
-    resolveCoordinates(lat, lng);
+    setMapCenterAndCircle(check.normalized.lat, check.normalized.lng, safeRadiusMeters);
+    resolveCoordinates(check.normalized.lat, check.normalized.lng);
   };
 
   return (
@@ -256,7 +364,7 @@ export function ZoneRadiusMap({
                   key={item.id}
                   type="button"
                   onClick={() => handleSelectSuggestion(item)}
-                  className="w-full text-left px-3 py-2 hover:bg-surface-subtle transition flex items-start gap-2.5"
+                  className="w-full text-left px-3 py-2 hover:bg-surface-subtle transition flex items-start gap-2.5 cursor-pointer"
                 >
                   <MapPin className="w-3.5 h-3.5 text-brand shrink-0 mt-0.5" />
                   <div className="min-w-0">

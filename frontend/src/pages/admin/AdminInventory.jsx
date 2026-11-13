@@ -22,12 +22,13 @@ import {
   RotateCcw,
   FolderTree,
   Filter,
+  SlidersHorizontal,
 } from 'lucide-react';
 import { Pagination } from '../../components/Pagination.jsx';
 import { useBulkSelection } from '../../hooks/useBulkSelection.js';
 import { BulkActionBar } from '../../components/BulkActionBar.jsx';
 import { BulkConfirmModal } from '../../components/BulkConfirmModal.jsx';
-import { SkeletonTable } from '../../components/skeleton/index.js';
+import { SkeletonTable, ImageWithSkeleton } from '../../components/skeleton/index.js';
 
 export function AdminInventory() {
   const [items, setItems] = useState([]);
@@ -384,7 +385,7 @@ export function AdminInventory() {
 
       {/* Inventory Table */}
       {loading ? (
-        <SkeletonTable rows={7} columns={6} showToolbar={false} showPagination={true} />
+        <SkeletonTable rows={7} columns={8} showToolbar={false} showPagination={true} />
       ) : error ? (
         <div className="p-6 bg-red-50 border border-red-200 text-status-error rounded-2xl text-center space-y-2">
           <p className="font-semibold text-xs">{error}</p>
@@ -423,11 +424,135 @@ export function AdminInventory() {
         </div>
       ) : (
         <div className="bg-surface border border-border-neutral rounded-2xl overflow-hidden shadow-xs">
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[750px] text-left text-xs">
+          {/* Mobile Card Layout (Shown on mobile screens < md) */}
+          <div className="block md:hidden">
+            <div className="p-3.5 bg-surface-subtle border-b border-border-neutral flex items-center justify-between text-xs">
+              <label className="flex items-center gap-2.5 cursor-pointer font-semibold text-text-main select-none">
+                <input
+                  type="checkbox"
+                  checked={
+                    items.length > 0 &&
+                    bulk.getPageSelectionState(items.map((i) => i.sku)).isAllSelected
+                  }
+                  onChange={() => bulk.toggleSelectPage(items.map((i) => i.sku))}
+                  className="rounded accent-brand w-4 h-4"
+                />
+                <span>Select All ({items.length})</span>
+              </label>
+              <span className="text-[11px] text-text-muted font-medium">
+                {bulk.selectedCount > 0 ? `${bulk.selectedCount} selected` : `Page ${page} of ${pagination.totalPages || 1}`}
+              </span>
+            </div>
+
+            <div className="divide-y divide-border-neutral">
+              {items.map((item) => {
+                const isSelected = bulk.isSelected(item.sku);
+                const isOut = item.stock === 0;
+                const isLow = !isOut && item.stock <= 10;
+
+                return (
+                  <div
+                    key={item.sku}
+                    className={`p-4 space-y-3 transition ${isSelected ? 'bg-brand-light/30' : 'hover:bg-surface-subtle/50'}`}
+                  >
+                    {/* Top: Checkbox, Thumbnail/Icon, Product Name & Stock Status Badge */}
+                    <div className="flex items-start gap-3">
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => bulk.toggleSelect(item.sku)}
+                        className="mt-1 rounded accent-brand shrink-0 w-4 h-4"
+                      />
+                      {item.images?.[0] ? (
+                        <ImageWithSkeleton
+                          src={item.images[0]}
+                          alt={item.productName}
+                          aspectRatio="aspect-square"
+                          containerClassName="w-12 h-12 rounded-xl shrink-0 bg-surface-subtle border border-border-neutral overflow-hidden"
+                          className="w-full h-full object-cover rounded-xl"
+                        />
+                      ) : (
+                        <div className="w-12 h-12 rounded-xl shrink-0 bg-surface-subtle border border-border-neutral flex items-center justify-center text-brand">
+                          <Boxes className="w-6 h-6 text-brand/70" />
+                        </div>
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-start justify-between gap-2">
+                          <span className="font-bold text-text-main text-xs block leading-snug truncate">
+                            {item.productName}
+                          </span>
+                          <span
+                            className={`shrink-0 px-2 py-0.5 rounded-md text-[9.5px] font-bold uppercase tracking-wider ${
+                              isOut
+                                ? 'bg-red-50 text-status-error border border-red-200'
+                                : isLow
+                                ? 'bg-amber-50 text-status-warning border border-amber-200'
+                                : 'bg-emerald-50 text-status-success border border-emerald-200'
+                            }`}
+                          >
+                            {isOut ? 'Out of Stock' : isLow ? 'Low Stock' : 'In Stock'}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5 mt-1 text-[10px] text-text-muted flex-wrap">
+                          <span className="font-mono text-brand font-semibold truncate max-w-[140px]">
+                            {item.sku}
+                          </span>
+                          <span>•</span>
+                          <span className="font-semibold text-text-main">{item.categoryName}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Stock & Pricing Details Box */}
+                    <div className="bg-surface-subtle/70 rounded-xl p-3 border border-border-neutral/60 grid grid-cols-3 gap-2 text-xs">
+                      <div>
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-text-muted block mb-0.5">
+                          Pack Size
+                        </span>
+                        <span className="font-bold text-text-main block">{item.label}</span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-text-muted block mb-0.5">
+                          Selling Price
+                        </span>
+                        <span className="font-extrabold text-brand font-mono block">
+                          ₹{(item.pricePaise / 100).toFixed(0)}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-text-muted block mb-0.5">
+                          Available Stock
+                        </span>
+                        <span className={`font-extrabold font-mono block ${isOut ? 'text-status-error' : isLow ? 'text-status-warning' : 'text-text-main'}`}>
+                          {item.stock} {item.stock === 1 ? 'pack' : 'packs'}
+                        </span>
+                        <span className="text-[9.5px] text-text-muted block">({item.label} each)</span>
+                      </div>
+                    </div>
+
+                    {/* Action Button */}
+                    <div className="pt-1">
+                      <button
+                        type="button"
+                        onClick={() => handleOpenAdjust(item)}
+                        className="w-full py-2 px-3 rounded-xl bg-surface hover:bg-surface-subtle border border-border-neutral text-brand font-bold text-xs transition inline-flex items-center justify-center gap-1.5 shadow-xs"
+                      >
+                        <SlidersHorizontal className="w-3.5 h-3.5" />
+                        <span>Adjust Stock ({item.stock} packs)</span>
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Desktop Table View (md and above) */}
+          <div className="hidden md:block overflow-x-auto">
+            <table className="w-full min-w-[850px] text-left text-xs">
               <thead className="bg-surface-subtle text-[11px] uppercase tracking-wider text-text-muted border-b border-border-neutral">
                 <tr>
-                  <th className="p-4 w-10 text-center">
+                  <th className="p-4 w-10 text-center whitespace-nowrap">
                     <input
                       type="checkbox"
                       checked={
@@ -438,24 +563,27 @@ export function AdminInventory() {
                       className="rounded accent-brand"
                     />
                   </th>
-                  <th className="p-4 font-semibold">SKU</th>
-                  <th className="p-4 font-semibold">Product Name</th>
-                  <th className="p-4 font-semibold">Department</th>
-                  <th className="p-4 font-semibold">Pack Size</th>
-                  <th className="p-4 font-semibold">Selling Price</th>
-                  <th className="p-4 font-semibold">Available Stock</th>
-                  <th className="p-4 font-semibold text-right">Actions</th>
+                  <th className="p-4 font-semibold whitespace-nowrap min-w-[130px]">SKU</th>
+                  <th className="p-4 font-semibold whitespace-nowrap min-w-[240px]">Product Name</th>
+                  <th className="p-4 font-semibold whitespace-nowrap min-w-[130px]">Department</th>
+                  <th className="p-4 font-semibold whitespace-nowrap min-w-[100px]">Pack Size</th>
+                  <th className="p-4 font-semibold whitespace-nowrap min-w-[100px]">Selling Price</th>
+                  <th className="p-4 font-semibold whitespace-nowrap min-w-[160px]">Available Stock</th>
+                  <th className="p-4 font-semibold text-right whitespace-nowrap min-w-[110px]">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border-neutral">
                 {items.map((item) => {
                   const isSelected = bulk.isSelected(item.sku);
+                  const isOut = item.stock === 0;
+                  const isLow = !isOut && item.stock <= 10;
+
                   return (
                     <tr
                       key={item.sku}
                       className={`transition ${isSelected ? 'bg-brand-light/30' : 'hover:bg-surface-subtle/60'}`}
                     >
-                      <td className="p-4 text-center">
+                      <td className="p-4 text-center whitespace-nowrap">
                         <input
                           type="checkbox"
                           checked={isSelected}
@@ -463,36 +591,81 @@ export function AdminInventory() {
                           className="rounded accent-brand"
                         />
                       </td>
-                      <td className="p-4 font-mono font-bold text-brand">{item.sku}</td>
-                    <td className="p-4 font-bold text-text-main max-w-xs truncate">{item.productName}</td>
-                    <td className="p-4 text-text-muted">{item.categoryName}</td>
-                    <td className="p-4 text-text-main font-semibold">{item.label}</td>
-                    <td className="p-4 font-bold text-text-main">₹{(item.pricePaise / 100).toFixed(0)}</td>
-                    <td className="p-4">
-                      <span
-                        className={`px-2.5 py-1 rounded-md text-[11px] font-semibold inline-block ${
-                          item.stock === 0
-                            ? 'bg-red-50 text-status-error border border-red-200'
-                            : item.stock <= 10
-                            ? 'bg-amber-50 text-status-warning border border-amber-200'
-                            : 'bg-emerald-50 text-status-success border border-emerald-200'
-                        }`}
-                      >
-                        {item.stock} {item.unit} {item.stock === 0 ? '(Out of Stock)' : item.stock <= 10 ? '(Low Stock)' : ''}
-                      </span>
-                    </td>
-                    <td className="p-4 text-right">
-                      <button
-                        type="button"
-                        onClick={() => handleOpenAdjust(item)}
-                        className="px-3 py-1.5 rounded-lg bg-surface hover:bg-surface-subtle border border-border-neutral text-brand font-semibold text-xs transition shadow-xs"
-                      >
-                        Adjust Stock
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
+                      <td className="p-4 font-mono font-bold text-brand whitespace-nowrap">
+                        {item.sku}
+                      </td>
+                      <td className="p-4 whitespace-nowrap">
+                        <div className="flex items-center gap-3">
+                          {item.images?.[0] ? (
+                            <ImageWithSkeleton
+                              src={item.images[0]}
+                              alt={item.productName}
+                              aspectRatio="aspect-square"
+                              containerClassName="w-10 h-10 rounded-lg shrink-0 bg-surface-subtle border border-border-neutral overflow-hidden"
+                              className="w-full h-full object-cover rounded-lg"
+                            />
+                          ) : (
+                            <div className="w-10 h-10 rounded-lg shrink-0 bg-surface-subtle border border-border-neutral flex items-center justify-center text-brand">
+                              <Boxes className="w-5 h-5 text-brand/70" />
+                            </div>
+                          )}
+                          <div className="min-w-0">
+                            <span className="font-bold text-text-main block max-w-xs truncate">
+                              {item.productName}
+                            </span>
+                            <span className="text-[10px] text-text-muted block">
+                              Pack: {item.label}
+                            </span>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="p-4 text-text-muted whitespace-nowrap font-medium">
+                        {item.categoryName}
+                      </td>
+                      <td className="p-4 text-text-main font-semibold whitespace-nowrap">
+                        {item.label}
+                      </td>
+                      <td className="p-4 font-bold text-text-main whitespace-nowrap font-mono">
+                        ₹{(item.pricePaise / 100).toFixed(0)}
+                      </td>
+                      <td className="p-4 whitespace-nowrap">
+                        <div className="space-y-0.5">
+                          <div className="flex items-center gap-1.5">
+                            <span
+                              className={`w-2 h-2 rounded-full shrink-0 ${
+                                isOut ? 'bg-status-error' : isLow ? 'bg-status-warning' : 'bg-status-success'
+                              }`}
+                            />
+                            <span className="font-extrabold text-text-main font-mono text-xs">
+                              {item.stock} {item.stock === 1 ? 'pack' : 'packs'}
+                            </span>
+                          </div>
+                          <span
+                            className={`inline-block px-1.5 py-0.2 rounded text-[9.5px] font-semibold border ${
+                              isOut
+                                ? 'bg-red-50 text-status-error border-red-200'
+                                : isLow
+                                ? 'bg-amber-50 text-status-warning border-amber-200'
+                                : 'bg-emerald-50 text-status-success border-emerald-200'
+                            }`}
+                          >
+                            {isOut ? 'Out of Stock' : isLow ? 'Low Stock' : 'In Stock'} ({item.label} each)
+                          </span>
+                        </div>
+                      </td>
+                      <td className="p-4 text-right whitespace-nowrap">
+                        <button
+                          type="button"
+                          onClick={() => handleOpenAdjust(item)}
+                          className="px-3 py-1.5 rounded-lg bg-surface hover:bg-surface-subtle border border-border-neutral text-brand font-semibold text-xs transition shadow-xs inline-flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <SlidersHorizontal className="w-3.5 h-3.5" />
+                          <span>Adjust Stock</span>
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -518,54 +691,152 @@ export function AdminInventory() {
 
       {/* Adjust Stock Modal */}
       {adjustModalOpen && selectedItem && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs animate-fadeIn">
-          <div className="relative w-full max-w-md bg-surface border border-border-neutral rounded-2xl p-6 text-text-main shadow-xl space-y-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs animate-fadeIn">
+          <div className="relative w-full max-w-md bg-surface border border-border-neutral rounded-2xl p-6 text-text-main shadow-2xl space-y-4">
             <button
               onClick={() => setAdjustModalOpen(false)}
               className="absolute top-5 right-5 p-2 rounded-lg text-text-muted hover:text-text-main hover:bg-surface-subtle transition"
+              aria-label="Close modal"
             >
               <X className="w-5 h-5" />
             </button>
 
-            <h3 className="text-lg font-bold font-heading text-text-main">Adjust Variant Stock</h3>
-            <div className="bg-surface-subtle p-3.5 rounded-xl border border-border-neutral text-xs space-y-1">
-              <p className="font-bold text-text-main">{selectedItem.productName}</p>
-              <p className="text-text-muted font-mono">SKU: {selectedItem.sku} • {selectedItem.label}</p>
-              <p className="text-brand font-semibold">Current Count: {selectedItem.stock} units</p>
+            <div>
+              <h3 className="text-lg font-bold font-heading text-text-main flex items-center gap-2">
+                <Boxes className="w-5 h-5 text-brand" />
+                <span>Adjust Variant Stock</span>
+              </h3>
+              <p className="text-[11px] text-text-muted mt-0.5">
+                Update the physical count of sealed packs available in the warehouse.
+              </p>
+            </div>
+
+            {/* Product & Variant Identity Card */}
+            <div className="bg-surface-subtle p-3.5 rounded-xl border border-border-neutral text-xs space-y-2">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="font-bold text-text-main text-sm truncate">{selectedItem.productName}</p>
+                  <p className="text-[10px] text-text-muted mt-0.5">
+                    Category: <span className="font-semibold text-text-main">{selectedItem.categoryName}</span>
+                  </p>
+                </div>
+                <span className="shrink-0 font-mono text-[10px] font-bold px-2 py-0.5 bg-surface rounded-md border border-border-neutral text-brand">
+                  {selectedItem.sku}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 pt-2 border-t border-border-neutral/60">
+                <div>
+                  <span className="text-[10px] uppercase font-bold text-text-muted tracking-wider block">
+                    Pack Size
+                  </span>
+                  <span className="font-bold text-text-main text-xs">{selectedItem.label}</span>
+                </div>
+                <div>
+                  <span className="text-[10px] uppercase font-bold text-text-muted tracking-wider block">
+                    Current Available Stock
+                  </span>
+                  <span className="font-extrabold text-brand text-xs">
+                    {selectedItem.stock} {selectedItem.stock === 1 ? 'pack' : 'packs'}
+                  </span>
+                </div>
+              </div>
             </div>
 
             {adjustError && (
-              <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-status-error">
-                {adjustError}
+              <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-status-error flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>{adjustError}</span>
               </div>
             )}
 
             <form onSubmit={handleAdjustSubmit} className="space-y-4 text-xs">
               <div>
-                <label className="block text-[11px] font-semibold text-text-main mb-1">New Total Stock Quantity</label>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-[11px] font-bold text-text-main">
+                    New Total Stock (Physical Packs/Units)
+                  </label>
+                  {Number(newStock) !== selectedItem.stock && (
+                    <span
+                      className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
+                        Number(newStock) > selectedItem.stock
+                          ? 'bg-emerald-50 text-status-success border border-emerald-200'
+                          : 'bg-amber-50 text-status-warning border border-amber-200'
+                      }`}
+                    >
+                      {Number(newStock) > selectedItem.stock
+                        ? `+${Number(newStock) - selectedItem.stock} packs (Restock)`
+                        : `${Number(newStock) - selectedItem.stock} packs (Depletion)`}
+                    </span>
+                  )}
+                </div>
                 <input
                   type="number"
                   value={newStock}
                   onChange={(e) => setNewStock(e.target.value)}
                   required
                   min={0}
-                  className="w-full px-3 py-2 bg-primary-bg border border-border-neutral rounded-xl text-text-main text-base font-bold focus:outline-none focus:border-brand focus:ring-1 focus:ring-brand"
+                  className="w-full px-3.5 py-2.5 bg-primary-bg border border-border-neutral rounded-xl text-text-main text-lg font-bold font-mono focus:outline-none focus:border-brand focus:ring-1 focus:ring-brand shadow-2xs"
                 />
+                <p className="text-[10px] text-text-muted mt-1">
+                  Enter the total sealed packets of {selectedItem.label} on the shelf.
+                </p>
+
+                {/* Quick Increment Shortcuts */}
+                <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+                  <span className="text-[10px] text-text-muted font-semibold">Quick add:</span>
+                  {[5, 10, 25, 50].map((inc) => (
+                    <button
+                      key={inc}
+                      type="button"
+                      onClick={() => setNewStock((prev) => Math.max(0, Number(prev || 0) + inc))}
+                      className="px-2 py-0.5 rounded-md bg-surface-subtle hover:bg-brand-light hover:text-brand border border-border-neutral text-[10px] font-semibold text-text-main transition shadow-2xs cursor-pointer"
+                    >
+                      +{inc}
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => setNewStock(0)}
+                    className="px-2 py-0.5 rounded-md bg-red-50 hover:bg-red-100 text-status-error border border-red-200 text-[10px] font-semibold transition shadow-2xs cursor-pointer ml-auto"
+                  >
+                    Set 0 (Out)
+                  </button>
+                </div>
               </div>
 
               <div>
-                <label className="block text-[11px] font-semibold text-text-main mb-1">Reason for Adjustment</label>
+                <label className="block text-[11px] font-bold text-text-main mb-1.5">
+                  Reason for Adjustment
+                </label>
                 <input
                   type="text"
                   value={reason}
                   onChange={(e) => setReason(e.target.value)}
                   required
                   placeholder="e.g. Shipment arrival / warehouse count reconciliation"
-                  className="w-full px-3 py-2 bg-primary-bg border border-border-neutral rounded-xl text-text-main placeholder:text-text-muted focus:outline-none focus:border-brand focus:ring-1 focus:ring-brand"
+                  className="w-full px-3.5 py-2.5 bg-primary-bg border border-border-neutral rounded-xl text-text-main placeholder:text-text-muted focus:outline-none focus:border-brand focus:ring-1 focus:ring-brand shadow-2xs"
                 />
+                {/* Reason Presets */}
+                <div className="flex items-center gap-1 mt-1.5 flex-wrap">
+                  {[
+                    'Shipment arrival at warehouse',
+                    'Physical stock reconciliation',
+                    'Damaged / expired pack removed',
+                  ].map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => setReason(preset)}
+                      className="text-[9.5px] px-2 py-0.5 rounded-md bg-surface border border-border-neutral/70 hover:border-brand text-text-muted hover:text-brand transition cursor-pointer"
+                    >
+                      {preset}
+                    </button>
+                  ))}
+                </div>
               </div>
 
-              <div className="flex gap-2 pt-2">
+              <div className="flex gap-2.5 pt-2">
                 <button
                   type="button"
                   onClick={() => setAdjustModalOpen(false)}
@@ -576,7 +847,7 @@ export function AdminInventory() {
                 <button
                   type="submit"
                   disabled={adjusting}
-                  className="flex-1 py-2.5 rounded-xl bg-brand hover:bg-brand-hover text-white font-semibold transition disabled:opacity-50 shadow-xs"
+                  className="flex-1 py-2.5 rounded-xl bg-brand hover:bg-brand-hover text-white font-bold transition disabled:opacity-50 shadow-xs flex items-center justify-center gap-2"
                 >
                   {adjusting ? 'Saving...' : 'Update Inventory'}
                 </button>

@@ -16,6 +16,7 @@
 import { env } from '../config/env.js';
 import { DeliveryZone } from '../models/DeliveryZone.js';
 import { StoreSetting } from '../models/StoreSetting.js';
+import { resolveDistanceDeliveryFee, isValidCoordinate } from '../utils/distancePricing.js';
 
 // Legacy approved Indore PIN codes export preserved for backward-compatibility
 export const APPROVED_INDORE_PINCODES = new Set([
@@ -183,7 +184,11 @@ export async function ensureDefaultZonesExist() {
 export async function getEffectiveStoreLocation() {
   try {
     const setting = await StoreSetting.findOne().lean();
-    if (setting && setting.dispatchCoordinates?.lat && setting.dispatchCoordinates?.lng) {
+    if (
+      setting &&
+      setting.dispatchCoordinates &&
+      isValidCoordinate(setting.dispatchCoordinates.lat, setting.dispatchCoordinates.lng)
+    ) {
       return {
         name: setting.storeName || 'Khushboo Food Service',
         address: setting.address || STORE_LOCATION.address,
@@ -400,14 +405,14 @@ export async function calculateDeliveryPricing({
   const storeLocation = await getEffectiveStoreLocation();
   let distanceKm = 3.5; // fallback default
 
-  if (coordinates && typeof coordinates.lat === 'number' && typeof coordinates.lng === 'number') {
+  if (coordinates && isValidCoordinate(coordinates.lat, coordinates.lng)) {
     distanceKm = calculateEstimatedRoadDistanceKm(
       storeLocation.lat,
       storeLocation.lng,
       coordinates.lat,
       coordinates.lng
     );
-  } else if (zone.center?.lat && zone.center?.lng) {
+  } else if (zone.center && isValidCoordinate(zone.center.lat, zone.center.lng)) {
     distanceKm = calculateEstimatedRoadDistanceKm(
       storeLocation.lat,
       storeLocation.lng,
@@ -417,7 +422,9 @@ export async function calculateDeliveryPricing({
   }
 
   // 4. Maximum Delivery Distance check
-  const maxDistance = zone.maxDeliveryDistanceKm || env.MAX_DELIVERY_DISTANCE_KM;
+  const storeSetting = await StoreSetting.findOne().lean();
+  const maxDistance = storeSetting?.maxDeliveryDistanceKm || zone.maxDeliveryDistanceKm || env.MAX_DELIVERY_DISTANCE_KM;
+
   if (distanceKm > maxDistance) {
     const minOrderAmountPaise = await getEffectiveMinOrderAmountPaise(zone);
     const freeDeliveryThresholdPaise = await getEffectiveFreeDeliveryThresholdPaise(zone);
@@ -439,22 +446,71 @@ export async function calculateDeliveryPricing({
         freeDeliveryThresholdPaise,
         estimatedDeliveryWindow: zone.estimatedDeliveryWindow,
       },
-      reason: `Distance (${distanceKm} km) exceeds maximum service limit (${maxDistance} km) for ${zone.name}.`,
+      reason: `Distance (${distanceKm} km) exceeds maximum service limit (${maxDistance} km) for Indore doorstep delivery.`,
       pricingSnapshot: { error: 'DISTANCE_EXCEEDED', distanceKm, maxDistance },
     };
   }
 
-  // 5. Zone Pricing Calculations
+  // 5. Zone Pricing Calculations (Distance-Based vs Standard Fallback)
   const freeThreshold = await getEffectiveFreeDeliveryThresholdPaise(zone);
   const isFreeDelivery = subtotalPaise >= freeThreshold;
+  const standardBaseFee = storeSetting?.deliveryFeeBasePaise ?? (zone.deliveryFeeBasePaise ?? env.DELIVERY_FEE_BASE_PAISE);
 
-  const baseFee = zone.deliveryFeeBasePaise ?? env.DELIVERY_FEE_BASE_PAISE;
-  const extraKmTier = zone.distanceTierPaisePerKm ?? 500;
-  // If distance exceeds 3 km, apply extra per-km fee
-  const extraKm = Math.max(0, Math.ceil(distanceKm - 3));
-  const standardFeePaise = baseFee + (extraKm * extraKmTier);
+  let standardFeePaise = standardBaseFee;
+  let pricingMode = 'STANDARD';
+  let appliedDistanceRule = null;
+  let matchedSlabLabel = 'Standard Delivery';
+
+  if (
+    storeSetting?.distanceBasedPricing?.enabled &&
+    Array.isArray(storeSetting.distanceBasedPricing.rules) &&
+    storeSetting.distanceBasedPricing.rules.length > 0
+  ) {
+    pricingMode = 'DISTANCE_BASED';
+    const distanceResolution = resolveDistanceDeliveryFee(
+      storeSetting.distanceBasedPricing.rules,
+      distanceKm,
+      maxDistance,
+      standardBaseFee
+    );
+
+    if (!distanceResolution.isDeliverable) {
+      const minOrderAmountPaise = await getEffectiveMinOrderAmountPaise(zone);
+      return {
+        isServiceable: false,
+        distanceKm,
+        deliveryFeePaise: 0,
+        standardFeePaise: 0,
+        isFreeDelivery: false,
+        minOrderAmountPaise,
+        freeDeliveryThresholdPaise: freeThreshold,
+        estimatedDeliveryWindow: zone.estimatedDeliveryWindow,
+        zone: {
+          id: zone._id,
+          code: zone.code,
+          name: zone.name,
+          city: zone.city,
+          minOrderAmountPaise,
+          freeDeliveryThresholdPaise: freeThreshold,
+          estimatedDeliveryWindow: zone.estimatedDeliveryWindow,
+        },
+        reason: distanceResolution.reason || `Delivery location is outside serviceable distance rules.`,
+        pricingSnapshot: { error: 'DISTANCE_EXCEEDED', distanceKm, maxDistance },
+      };
+    }
+
+    standardFeePaise = distanceResolution.deliveryFeePaise;
+    appliedDistanceRule = distanceResolution.appliedRule;
+    matchedSlabLabel = appliedDistanceRule?.label || `${distanceKm} km (Distance Slab)`;
+  } else {
+    // Legacy standard fee calculation with extra km tier if applicable
+    const extraKmTier = zone.distanceTierPaisePerKm ?? 500;
+    const extraKm = Math.max(0, Math.ceil(distanceKm - 3));
+    standardFeePaise = standardBaseFee + (extraKm * extraKmTier);
+    matchedSlabLabel = `Standard Fee (${distanceKm} km)`;
+  }
+
   const deliveryFeePaise = isFreeDelivery ? 0 : standardFeePaise;
-
   const minOrderAmount = await getEffectiveMinOrderAmountPaise(zone);
 
   const pricingSnapshot = {
@@ -463,9 +519,9 @@ export async function calculateDeliveryPricing({
     zoneName: zone.name,
     storeLocation,
     distanceKm,
-    baseFeePaise: baseFee,
-    extraKm,
-    extraKmTierPaise: extraKmTier,
+    pricingMode,
+    appliedDistanceRule,
+    matchedSlabLabel,
     standardFeePaise,
     deliveryFeePaise,
     isFreeDelivery,
@@ -482,6 +538,9 @@ export async function calculateDeliveryPricing({
     deliveryFeePaise,
     standardFeePaise,
     isFreeDelivery,
+    pricingMode,
+    appliedDistanceRule,
+    matchedSlabLabel,
     minOrderAmountPaise: minOrderAmount,
     freeDeliveryThresholdPaise: freeThreshold,
     estimatedDeliveryWindow: zone.estimatedDeliveryWindow,

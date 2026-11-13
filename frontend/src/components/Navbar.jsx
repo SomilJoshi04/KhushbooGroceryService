@@ -37,6 +37,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { LocationPickerModal } from './map/LocationPickerModal.jsx';
 import { NotificationBell } from './NotificationBell.jsx';
 import { resolveImageUrl, getApiUploadUrl } from '../config/api.js';
+import { safeParseStoredLocation, validateCoordinates } from '../utils/coordinateValidator.js';
 
 export function Navbar({ onOpenAuth }) {
   const { user, isAuthenticated, isAdmin, isSuperAdmin, logout, exitPreviewMode } = useAuth();
@@ -52,15 +53,14 @@ export function Navbar({ onOpenAuth }) {
   const navigate = useNavigate();
   const location = useLocation();
 
-  // Active customer location state (loaded from localStorage or fallback)
+  // Active customer location state (loaded and validated from localStorage)
   const [customerLocation, setCustomerLocation] = useState(() => {
     try {
       const stored = localStorage.getItem('khushboo_customer_location');
-      if (stored) return JSON.parse(stored);
-    } catch (e) {
-      // Ignore JSON parse errors
+      return safeParseStoredLocation(stored);
+    } catch {
+      return null;
     }
-    return null;
   });
 
   // Track dismissed announcement banner in sessionStorage
@@ -128,9 +128,13 @@ export function Navbar({ onOpenAuth }) {
     return 'Select delivery location';
   })();
 
-  // Handle location selection from interactive Leaflet map modal
+  // Handle location selection from interactive map modal
   const handleLocationModalConfirm = (locData) => {
+    if (!locData) return;
+    const coordCheck = validateCoordinates(locData.coordinates);
+
     const shortName =
+      locData.name ||
       locData.locality ||
       (locData.formattedAddress ? locData.formattedAddress.split(',')[0].trim() : '') ||
       locData.city ||
@@ -140,14 +144,16 @@ export function Navbar({ onOpenAuth }) {
       shortName,
       locality: locData.locality || '',
       formattedAddress: locData.formattedAddress || '',
-      coordinates: locData.coordinates || null,
+      coordinates: coordCheck.valid && coordCheck.normalized ? coordCheck.normalized : null,
       pincode: locData.pincode || '',
-      city: locData.city || 'Indore',
+      city: locData.city || '',
     };
 
     setCustomerLocation(newLoc);
     try {
-      localStorage.setItem('khushboo_customer_location', JSON.stringify(newLoc));
+      if (newLoc.coordinates) {
+        localStorage.setItem('khushboo_customer_location', JSON.stringify(newLoc));
+      }
       window.dispatchEvent(new CustomEvent('khushboo:location_changed', { detail: newLoc }));
     } catch (e) {
       // Ignore storage errors
@@ -157,12 +163,13 @@ export function Navbar({ onOpenAuth }) {
 
   // Handle location selection from saved addresses list
   const handleSelectSavedAddress = (addr) => {
+    const coordCheck = validateCoordinates(addr.coordinates);
     const shortName =
       addr.locality ||
       addr.landmark ||
       addr.street?.split(',')[0].trim() ||
       addr.city ||
-      'Indore';
+      'Saved Location';
 
     const newLoc = {
       addressId: addr._id,
@@ -170,13 +177,15 @@ export function Navbar({ onOpenAuth }) {
       locality: addr.locality || '',
       formattedAddress: `${addr.street}, ${addr.city} ${addr.pincode}`,
       pincode: addr.pincode || '',
-      city: addr.city || 'Indore',
-      coordinates: addr.coordinates || null,
+      city: addr.city || '',
+      coordinates: coordCheck.valid && coordCheck.normalized ? coordCheck.normalized : null,
     };
 
     setCustomerLocation(newLoc);
     try {
-      localStorage.setItem('khushboo_customer_location', JSON.stringify(newLoc));
+      if (newLoc.coordinates) {
+        localStorage.setItem('khushboo_customer_location', JSON.stringify(newLoc));
+      }
       window.dispatchEvent(new CustomEvent('khushboo:location_changed', { detail: newLoc }));
     } catch (e) {
       // Ignore storage errors

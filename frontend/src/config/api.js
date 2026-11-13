@@ -75,12 +75,20 @@ export const apiClient = axios.create({
  */
 function sanitizeApiError(error) {
   if (error.response) {
-    const serverMessage =
-      error.response.data?.message ||
-      `Request failed with status ${error.response.status}.`;
+    const details = error.response.data?.details;
+    let serverMessage = error.response.data?.message;
+
+    // Surface field-level validation messages (e.g. from Zod or Mongoose)
+    if (Array.isArray(details) && details.length > 0) {
+      serverMessage = details.map((d) => d.message).filter(Boolean).join('. ');
+    } else if (!serverMessage) {
+      serverMessage = `Request failed with status ${error.response.status}.`;
+    }
+
     const err = new Error(serverMessage);
     err.response = error.response;
     err.status = error.response.status;
+    err.details = details;
     return err;
   }
 

@@ -39,28 +39,34 @@ export function ResetPasswordPage() {
   const [error, setError] = useState(!token ? 'No password reset token was provided.' : '');
   const [success, setSuccess] = useState(false);
 
-  // Dynamic Password Validation Rules
+  // Dynamic Password Validation Rules (Simplified: minimum 6 characters)
   const passwordCriteria = useMemo(() => {
     return {
-      length: newPassword.length >= 12,
-      uppercase: /[A-Z]/.test(newPassword),
-      lowercase: /[a-z]/.test(newPassword),
-      number: /[0-9]/.test(newPassword),
-      special: /[^A-Za-z0-9]/.test(newPassword),
+      length: newPassword.length >= 6,
+      hasLetter: /[a-zA-Z]/.test(newPassword),
+      hasNumber: /[0-9]/.test(newPassword),
+      hasSpecial: /[^a-zA-Z0-9]/.test(newPassword),
     };
   }, [newPassword]);
 
   const strengthScore = useMemo(() => {
-    return Object.values(passwordCriteria).filter(Boolean).length;
-  }, [passwordCriteria]);
+    if (!newPassword) return 0;
+    if (newPassword.length < 6) return 1;
+    let score = 2;
+    if (passwordCriteria.hasLetter && passwordCriteria.hasNumber) score += 1;
+    if (passwordCriteria.hasSpecial) score += 1;
+    if (newPassword.length >= 10) score += 1;
+    return Math.min(score, 5);
+  }, [newPassword, passwordCriteria]);
 
   const strengthLabel = useMemo(() => {
-    if (strengthScore <= 1) return { label: 'Very Weak', color: 'bg-red-500', text: 'text-red-500' };
-    if (strengthScore === 2) return { label: 'Weak', color: 'bg-orange-500', text: 'text-orange-500' };
-    if (strengthScore === 3) return { label: 'Medium', color: 'bg-yellow-500', text: 'text-yellow-600' };
+    if (!newPassword) return { label: '', color: 'bg-gray-200', text: 'text-text-muted' };
+    if (newPassword.length < 6) return { label: 'Too short (min 6 chars)', color: 'bg-red-500', text: 'text-red-500' };
+    if (strengthScore <= 2) return { label: 'Fair', color: 'bg-orange-500', text: 'text-orange-500' };
+    if (strengthScore === 3) return { label: 'Good', color: 'bg-yellow-500', text: 'text-yellow-600' };
     if (strengthScore === 4) return { label: 'Strong', color: 'bg-emerald-500', text: 'text-emerald-600' };
     return { label: 'Excellent', color: 'bg-brand', text: 'text-brand' };
-  }, [strengthScore]);
+  }, [newPassword, strengthScore]);
 
   const passwordsMatch = newPassword && confirmPassword && newPassword === confirmPassword;
 
@@ -71,13 +77,8 @@ export function ResetPasswordPage() {
       return;
     }
 
-    if (newPassword.length < 12) {
-      setError('Password must contain at least 12 characters.');
-      return;
-    }
-
-    if (strengthScore < 4) {
-      setError('Password must include uppercase, lowercase, numbers, and special characters.');
+    if (newPassword.length < 6) {
+      setError('Password must contain at least 6 characters.');
       return;
     }
 
@@ -205,26 +206,22 @@ export function ResetPasswordPage() {
                     ))}
                   </div>
 
-                  <div className="grid grid-cols-2 gap-1 text-[11px] text-text-muted pt-1">
-                    <div className={`flex items-center gap-1.5 ${passwordCriteria.length ? 'text-brand' : ''}`}>
-                      {passwordCriteria.length ? <Check className="w-3.5 h-3.5 shrink-0" /> : <X className="w-3.5 h-3.5 shrink-0 opacity-40" />}
-                      <span>12+ characters</span>
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px] text-text-muted pt-1">
+                    <div className={`flex items-center gap-1.5 ${passwordCriteria.length ? 'text-brand font-medium' : ''}`}>
+                      {passwordCriteria.length ? <Check className="w-3.5 h-3.5 shrink-0 text-brand" /> : <X className="w-3.5 h-3.5 shrink-0 opacity-40" />}
+                      <span>At least 6 characters</span>
                     </div>
-                    <div className={`flex items-center gap-1.5 ${passwordCriteria.uppercase ? 'text-brand' : ''}`}>
-                      {passwordCriteria.uppercase ? <Check className="w-3.5 h-3.5 shrink-0" /> : <X className="w-3.5 h-3.5 shrink-0 opacity-40" />}
-                      <span>Uppercase letter</span>
+                    <div className={`flex items-center gap-1.5 ${passwordCriteria.hasLetter ? 'text-brand' : ''}`}>
+                      {passwordCriteria.hasLetter ? <Check className="w-3.5 h-3.5 shrink-0 text-brand" /> : <span className="w-1.5 h-1.5 rounded-full bg-border-neutral shrink-0" />}
+                      <span>Letters (A-Z, a-z)</span>
                     </div>
-                    <div className={`flex items-center gap-1.5 ${passwordCriteria.lowercase ? 'text-brand' : ''}`}>
-                      {passwordCriteria.lowercase ? <Check className="w-3.5 h-3.5 shrink-0" /> : <X className="w-3.5 h-3.5 shrink-0 opacity-40" />}
-                      <span>Lowercase letter</span>
+                    <div className={`flex items-center gap-1.5 ${passwordCriteria.hasNumber ? 'text-brand' : ''}`}>
+                      {passwordCriteria.hasNumber ? <Check className="w-3.5 h-3.5 shrink-0 text-brand" /> : <span className="w-1.5 h-1.5 rounded-full bg-border-neutral shrink-0" />}
+                      <span>Numbers (0-9)</span>
                     </div>
-                    <div className={`flex items-center gap-1.5 ${passwordCriteria.number ? 'text-brand' : ''}`}>
-                      {passwordCriteria.number ? <Check className="w-3.5 h-3.5 shrink-0" /> : <X className="w-3.5 h-3.5 shrink-0 opacity-40" />}
-                      <span>Number</span>
-                    </div>
-                    <div className={`flex items-center gap-1.5 ${passwordCriteria.special ? 'text-brand' : ''}`}>
-                      {passwordCriteria.special ? <Check className="w-3.5 h-3.5 shrink-0" /> : <X className="w-3.5 h-3.5 shrink-0 opacity-40" />}
-                      <span>Special character</span>
+                    <div className={`flex items-center gap-1.5 ${passwordCriteria.hasSpecial ? 'text-brand' : ''}`}>
+                      {passwordCriteria.hasSpecial ? <Check className="w-3.5 h-3.5 shrink-0 text-brand" /> : <span className="w-1.5 h-1.5 rounded-full bg-border-neutral shrink-0" />}
+                      <span>Special characters (!@#$)</span>
                     </div>
                   </div>
                 </div>
@@ -242,7 +239,7 @@ export function ResetPasswordPage() {
                   type={showConfirmPassword ? 'text' : 'password'}
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
-                  placeholder="••••••••••••"
+                  placeholder="Min 6 characters"
                   required
                   autoComplete="new-password"
                   className={`w-full pl-10 pr-10 py-2.5 text-sm bg-surface-subtle border rounded-xl text-text-main focus:outline-none transition placeholder:text-text-muted shadow-2xs ${
@@ -267,7 +264,7 @@ export function ResetPasswordPage() {
 
             <button
               type="submit"
-              disabled={loading || strengthScore < 4 || !passwordsMatch || !token}
+              disabled={loading || newPassword.length < 6 || !passwordsMatch || !token}
               className="w-full py-3 px-4 bg-brand hover:bg-brand-hover text-white font-semibold text-sm rounded-xl shadow-xs transition disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer mt-4"
             >
               {loading ? (

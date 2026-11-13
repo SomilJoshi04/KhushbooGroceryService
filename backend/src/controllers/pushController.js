@@ -14,6 +14,7 @@
 import { env } from '../config/env.js';
 import { PushSubscription } from '../models/PushSubscription.js';
 import { sendPushToUser, buildPushPayload } from '../services/pushNotificationService.js';
+import { encryptKey } from '../utils/pushCrypto.js';
 
 /**
  * Validates endpoint URL strictly to ensure it is HTTPS and from valid push services.
@@ -36,6 +37,8 @@ function isValidPushEndpoint(endpoint) {
 /**
  * GET /api/v1/push/vapid-public-key
  * Returns the VAPID public key for frontend subscription initialization.
+ * Cache-Control: no-store prevents 304 Not Modified responses that would return
+ * an empty body — the frontend must always receive the full JSON payload.
  */
 export async function getVapidPublicKey(req, res) {
   if (!env.VAPID_PUBLIC_KEY) {
@@ -43,6 +46,14 @@ export async function getVapidPublicKey(req, res) {
       success: false,
       message: 'Web push is currently unavailable: VAPID public key not configured.',
     });
+  }
+
+  // Prevent browser/proxy caching — the VAPID key must always be returned as a full response.
+  // A cached 304 would result in an empty body, breaking key derivation on the client.
+  if (typeof res.set === 'function') {
+    res.set('Cache-Control', 'no-store');
+  } else if (typeof res.setHeader === 'function') {
+    res.setHeader('Cache-Control', 'no-store');
   }
 
   return res.status(200).json({
@@ -96,46 +107,48 @@ export async function subscribe(req, res) {
       browser: (deviceInfo?.browser || '').slice(0, 50),
     };
 
-    // Upsert by endpoint: handle device re-registration or user account switch on same browser
-    let subscription = await PushSubscription.findOne({ endpoint });
-
-    if (subscription) {
-      subscription.userId = userId;
-      subscription.role = userRole;
-      subscription.keys = {
-        p256dh: keys.p256dh,
-        auth: keys.auth,
-      };
-      subscription.expirationTime = expirationTime ? new Date(expirationTime) : null;
-      subscription.deviceInfo = safeDeviceInfo;
-      subscription.isActive = true;
-      subscription.failureCount = 0;
-      await subscription.save();
-    } else {
-      subscription = new PushSubscription({
-        userId,
-        role: userRole,
-        endpoint,
-        keys: {
-          p256dh: keys.p256dh,
-          auth: keys.auth,
-        },
-        expirationTime: expirationTime ? new Date(expirationTime) : null,
-        deviceInfo: safeDeviceInfo,
-        isActive: true,
-      });
-      await subscription.save();
+    let safeExpirationTime = null;
+    if (expirationTime) {
+      const parsedDate = new Date(expirationTime);
+      if (!isNaN(parsedDate.getTime())) {
+        safeExpirationTime = parsedDate;
+      }
     }
+
+    const encP256dh = encryptKey(keys.p256dh);
+    const encAuth = encryptKey(keys.auth);
+
+    // Atomic upsert by endpoint: ensures zero race conditions and robust handling of device re-registration
+    await PushSubscription.findOneAndUpdate(
+      { endpoint },
+      {
+        $set: {
+          userId,
+          role: userRole,
+          endpoint,
+          keys: {
+            p256dh: encP256dh,
+            auth: encAuth,
+          },
+          expirationTime: safeExpirationTime,
+          deviceInfo: safeDeviceInfo,
+          isActive: true,
+          failureCount: 0,
+        },
+      },
+      { upsert: true, new: true, runValidators: true }
+    );
 
     return res.status(200).json({
       success: true,
       message: 'Browser push notifications enabled successfully.',
     });
   } catch (err) {
-    console.error('[pushController] subscribe error:', err.message);
+    console.error('[pushController] subscribe error:', err);
     return res.status(500).json({
       success: false,
-      message: 'Failed to save push notification subscription.',
+      message: `Failed to save push notification subscription: ${err.message}`,
+      error: err.message,
     });
   }
 }

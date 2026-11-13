@@ -84,6 +84,21 @@ const storeSettingSchema = new mongoose.Schema(
       default: '90 - 120 Minutes',
       trim: true,
     },
+    distanceBasedPricing: {
+      enabled: {
+        type: Boolean,
+        default: false,
+      },
+      rules: [
+        {
+          fromKm: { type: Number, required: true, min: 0 },
+          toKm: { type: Number, required: true, min: 0.1 },
+          feePaise: { type: Number, required: true, min: 0 },
+          useStandardFee: { type: Boolean, default: false },
+          label: { type: String, trim: true, default: '' },
+        },
+      ],
+    },
     notificationSettings: {
       soundEnabled: {
         type: Boolean,

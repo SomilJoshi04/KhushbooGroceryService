@@ -29,7 +29,6 @@ import {
   WifiOff,
   X,
   Volume2,
-  BellRing,
 } from 'lucide-react';
 import { useNotifications } from '../context/NotificationContext.jsx';
 
@@ -102,16 +101,7 @@ export function NotificationBell({ placement = 'customer' }) {
     clearAllRead,
     registerBellElement,
     setNotificationCenterOpen,
-    desktopPermission,
-    requestDesktopPermission,
-    pushSupported,
-    isPushSubscribed,
-    enablePush,
-    pushLoading,
   } = useNotifications();
-
-  const [pushDismissed, setPushDismissed] = useState(false);
-  const [pushError, setPushError] = useState('');
 
   const [isOpen, setIsOpen] = useState(false);
   const [activeFilter, setActiveFilter] = useState('ALL'); // 'ALL' | 'UNREAD'
@@ -284,75 +274,6 @@ export function NotificationBell({ placement = 'customer' }) {
                 >
                   Enable Sound
                 </button>
-              </div>
-            )}
-
-            {/* Web Push / Desktop Notification: Blocked State Guidance */}
-            {pushSupported && !isPushSubscribed && !pushDismissed && (desktopPermission === 'denied' || pushError.toLowerCase().includes('denied')) && (
-              <div className="px-3 py-2 bg-amber-500/10 border-b border-amber-500/20 flex items-center justify-between text-[11px] text-amber-900 shrink-0">
-                <div className="flex items-center gap-1.5 min-w-0 pr-1">
-                  <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                  <span className="leading-tight">
-                    Notifications blocked by browser. Click the lock/tune icon in address bar to Allow.
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setPushDismissed(true);
-                    setPushError('');
-                  }}
-                  className="p-0.5 text-amber-700 hover:text-amber-900 rounded shrink-0 ml-1"
-                  title="Dismiss"
-                >
-                  <X className="w-3 h-3" />
-                </button>
-              </div>
-            )}
-
-            {/* Web Push / Desktop Notification Opt-in Prompt */}
-            {pushSupported && !isPushSubscribed && !pushDismissed && desktopPermission !== 'denied' && !pushError.toLowerCase().includes('denied') && (
-              <div className="px-3 py-1.5 bg-brand-light/40 border-b border-brand/20 flex flex-col gap-1 text-[11px] text-brand shrink-0">
-                <div className="flex items-center justify-between w-full">
-                  <div className="flex items-center gap-1.5 min-w-0 pr-1">
-                    <BellRing className="w-3.5 h-3.5 shrink-0" />
-                    <span className="truncate font-medium">Receive order alerts when tab is closed?</span>
-                  </div>
-                  <div className="flex items-center gap-1 shrink-0 ml-1">
-                    <button
-                      type="button"
-                      disabled={pushLoading}
-                      onClick={async () => {
-                        setPushError('');
-                        try {
-                          await enablePush();
-                        } catch (err) {
-                          setPushError(err.message || 'Could not enable notifications.');
-                        }
-                      }}
-                      className="px-2 py-0.5 bg-brand text-white font-bold rounded-md text-[10px] hover:bg-brand-hover transition cursor-pointer shadow-2xs disabled:opacity-50"
-                    >
-                      {pushLoading ? 'Enabling...' : 'Enable'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setPushDismissed(true);
-                        setPushError('');
-                      }}
-                      className="p-0.5 text-text-muted hover:text-text-main rounded transition"
-                      title="Dismiss"
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
-                  </div>
-                </div>
-                {pushError && (
-                  <div className="text-[10px] text-status-error flex items-center gap-1 pt-0.5">
-                    <AlertTriangle className="w-3 h-3 shrink-0" />
-                    <span className="truncate">{pushError}</span>
-                  </div>
-                )}
               </div>
             )}
 

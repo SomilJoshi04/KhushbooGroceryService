@@ -27,6 +27,11 @@ import {
 } from '../utils/pagination.js';
 import { executeBulkOperation } from '../utils/bulkOperations.js';
 import { emitToAll } from '../socket.js';
+import { validateDistanceRules, validateCoordinates } from '../utils/distancePricing.js';
+import {
+  validateCouponApplicabilityConfig,
+  validateAndCalculateCouponDiscount,
+} from '../services/couponService.js';
 
 /**
  * Valid forward transitions for Order Status Machine.
@@ -876,14 +881,13 @@ export async function updateProductStock(req, res, next) {
 
     await InventoryMovement.create({
       product: product._id,
-      variantSku: sku,
-      quantityChange: diff,
-      resultingStock: newStock,
-      movementType: 'MANUAL_ADJUSTMENT',
-      reason,
+      sku,
+      type: diff >= 0 ? 'ADMIN_RESTOCK' : 'MANUAL_AUDIT_ADJUSTMENT',
+      quantityDelta: diff,
+      previousStock: prevStock,
+      newStock,
+      reason: reason || 'Manual stock update via Admin Dashboard',
       performedBy: req.user._id,
-      ipAddress: req.ip || '',
-      requestId: req.id,
     });
 
     // Real-Time Notification: Low stock alert if variant stock is 5 or below
@@ -1009,6 +1013,8 @@ export async function getInventory(req, res, next) {
           mrpPaise: '$variants.mrpPaise',
           stock: '$variants.stock',
           unit: '$variants.unit',
+          quantity: '$variants.quantity',
+          images: '$images',
           isActive: {
             $and: [
               { $ifNull: ['$variants.isActive', true] },
@@ -1113,7 +1119,13 @@ export async function getCoupons(req, res, next) {
 
     const [totalRecords, coupons] = await Promise.all([
       Coupon.countDocuments(filter),
-      Coupon.find(filter).sort(sortObj).skip(skip).limit(limit).lean(),
+      Coupon.find(filter)
+        .populate('applicability.categoryIds', 'name slug')
+        .populate('applicability.productIds', 'name slug images')
+        .sort(sortObj)
+        .skip(skip)
+        .limit(limit)
+        .lean(),
     ]);
 
     return res.json(
@@ -1144,6 +1156,24 @@ export async function createCoupon(req, res, next) {
       });
     }
 
+    if (couponData.applicability) {
+      const appValidation = await validateCouponApplicabilityConfig(couponData.applicability);
+      if (!appValidation.valid) {
+        return res.status(400).json({
+          success: false,
+          requestId: req.id,
+          message: appValidation.error,
+        });
+      }
+      couponData.applicability = appValidation.sanitizedApplicability;
+    } else {
+      couponData.applicability = {
+        type: 'ALL_PRODUCTS',
+        categoryIds: [],
+        productIds: [],
+      };
+    }
+
     const coupon = await Coupon.create(couponData);
 
     await AuditLog.create({
@@ -1152,7 +1182,12 @@ export async function createCoupon(req, res, next) {
       performerRole: req.user.role,
       targetType: 'Coupon',
       targetId: coupon._id.toString(),
-      details: { code: coupon.code, discountType: coupon.discountType, discountValue: coupon.discountValue },
+      details: {
+        code: coupon.code,
+        discountType: coupon.discountType,
+        discountValue: coupon.discountValue,
+        applicabilityType: coupon.applicability?.type,
+      },
       ipAddress: req.ip || '',
       requestId: req.id,
     });
@@ -1195,7 +1230,34 @@ export async function updateCoupon(req, res, next) {
     const { id } = req.params;
     const updates = req.body;
 
-    const coupon = await Coupon.findByIdAndUpdate(id, updates, { new: true });
+    if (updates.applicability) {
+      const appValidation = await validateCouponApplicabilityConfig(updates.applicability);
+      if (!appValidation.valid) {
+        return res.status(400).json({
+          success: false,
+          requestId: req.id,
+          message: appValidation.error,
+        });
+      }
+      updates.applicability = appValidation.sanitizedApplicability;
+    }
+
+    if (updates.code) {
+      updates.code = updates.code.toUpperCase().trim();
+      const existing = await Coupon.findOne({ code: updates.code, _id: { $ne: id } });
+      if (existing) {
+        return res.status(409).json({
+          success: false,
+          requestId: req.id,
+          message: `Coupon code "${updates.code}" already exists.`,
+        });
+      }
+    }
+
+    const coupon = await Coupon.findByIdAndUpdate(id, updates, { new: true })
+      .populate('applicability.categoryIds', 'name slug')
+      .populate('applicability.productIds', 'name slug images');
+
     if (!coupon) {
       return res.status(404).json({
         success: false,
@@ -1243,7 +1305,7 @@ export async function deleteCoupon(req, res, next) {
  */
 export async function validateCoupon(req, res, next) {
   try {
-    const { code, subtotalPaise } = req.body;
+    const { code, items, subtotalPaise } = req.body;
     if (!code) {
       return res.status(400).json({
         success: false,
@@ -1252,21 +1314,18 @@ export async function validateCoupon(req, res, next) {
       });
     }
 
-    const coupon = await Coupon.findOne({ code: code.toUpperCase().trim() });
-    if (!coupon) {
-      return res.status(404).json({
-        success: false,
-        requestId: req.id,
-        message: 'Invalid coupon code.',
-      });
-    }
+    const result = await validateAndCalculateCouponDiscount({
+      couponCode: code,
+      items: Array.isArray(items) ? items : [],
+      subtotalPaise: Number(subtotalPaise) || 0,
+    });
 
-    const check = coupon.isValidForCart(Number(subtotalPaise) || 0);
-    if (!check.valid) {
+    if (!result.valid) {
       return res.status(400).json({
         success: false,
         requestId: req.id,
-        message: check.reason,
+        code: result.code,
+        message: result.message,
       });
     }
 
@@ -1274,10 +1333,15 @@ export async function validateCoupon(req, res, next) {
       success: true,
       requestId: req.id,
       valid: true,
-      code: coupon.code,
-      discountPaise: check.discountPaise,
-      discountRupees: (check.discountPaise / 100).toFixed(0),
-      description: coupon.description,
+      code: result.code,
+      discountPaise: result.discountPaise,
+      discountRupees: result.discountRupees,
+      eligibleSubtotalPaise: result.eligibleSubtotalPaise,
+      eligibleSubtotalRupees: result.eligibleSubtotalRupees,
+      applicabilityType: result.applicabilityType,
+      eligibleItemCount: result.eligibleItemCount,
+      itemDiscounts: result.itemDiscounts,
+      description: result.description,
     });
   } catch (err) {
     next(err);
@@ -1327,6 +1391,17 @@ export async function getStoreSettings(req, res, next) {
         paymentSettings: {
           codEnabled: settings.paymentSettings?.codEnabled ?? true,
           onlinePaymentEnabled: settings.paymentSettings?.onlinePaymentEnabled ?? true,
+        },
+        distanceBasedPricing: {
+          enabled: settings.distanceBasedPricing?.enabled ?? false,
+          rules: (settings.distanceBasedPricing?.rules || []).map((r) => ({
+            fromKm: r.fromKm,
+            toKm: r.toKm,
+            feePaise: r.feePaise,
+            feeRupees: (r.feePaise || 0) / 100,
+            useStandardFee: Boolean(r.useStandardFee),
+            label: r.label || `${r.fromKm}–${r.toKm} km`,
+          })),
         },
         userSoundEnabled: req.user?.soundEnabled ?? true,
         effectiveSoundEnabled: (settings.notificationSettings?.soundEnabled ?? true) && (req.user?.soundEnabled ?? true),
@@ -1398,7 +1473,6 @@ export async function updateStoreSettings(req, res, next) {
       'address',
       'serviceCity',
       'servicePincode',
-      'dispatchCoordinates',
       'isOpen',
       'announcementNotice',
       'minOrderAmountPaise',
@@ -1412,6 +1486,21 @@ export async function updateStoreSettings(req, res, next) {
       if (rawUpdates[key] !== undefined) {
         settings[key] = rawUpdates[key];
       }
+    }
+
+    // Strict validation for authoritative dispatch coordinates
+    if (rawUpdates.dispatchCoordinates !== undefined) {
+      const coordCheck = validateCoordinates(rawUpdates.dispatchCoordinates);
+      if (!coordCheck.valid) {
+        return res.status(400).json({
+          success: false,
+          requestId: req.id,
+          code: 'INVALID_DISPATCH_COORDINATES',
+          error: 'INVALID_DISPATCH_COORDINATES',
+          message: coordCheck.error || 'Invalid dispatch coordinates provided.',
+        });
+      }
+      settings.dispatchCoordinates = coordCheck.normalized;
     }
 
     // Handle notificationSettings allowlist
@@ -1438,6 +1527,70 @@ export async function updateStoreSettings(req, res, next) {
       onlinePaymentEnabled: targetOnline,
     };
 
+    // Determine target values for distance validation
+    const targetMaxDistance = rawUpdates.maxDeliveryDistanceKm !== undefined
+      ? Number(rawUpdates.maxDeliveryDistanceKm)
+      : (settings.maxDeliveryDistanceKm || 15);
+
+    const targetDeliveryFeeBase = rawUpdates.deliveryFeeBasePaise !== undefined
+      ? Number(rawUpdates.deliveryFeeBasePaise)
+      : (settings.deliveryFeeBasePaise || 2500);
+
+    // Handle distanceBasedPricing configuration and strict validation
+    if (rawUpdates.distanceBasedPricing !== undefined && typeof rawUpdates.distanceBasedPricing === 'object') {
+      const isEnabled = Boolean(rawUpdates.distanceBasedPricing.enabled);
+      const incomingRules = Array.isArray(rawUpdates.distanceBasedPricing.rules)
+        ? rawUpdates.distanceBasedPricing.rules
+        : [];
+
+      if (isEnabled) {
+        const validation = validateDistanceRules(incomingRules, targetMaxDistance, targetDeliveryFeeBase);
+        if (!validation.valid) {
+          return res.status(400).json({
+            success: false,
+            requestId: req.id,
+            code: 'INVALID_DISTANCE_PRICING_CONFIG',
+            error: 'INVALID_DISTANCE_PRICING_CONFIG',
+            message: validation.errors[0] || 'Invalid distance pricing configuration.',
+            errors: validation.errors,
+          });
+        }
+        settings.distanceBasedPricing = {
+          enabled: true,
+          rules: validation.normalizedRules,
+        };
+      } else {
+        // Disabled: normalize rules if provided, otherwise preserve existing
+        if (incomingRules.length > 0) {
+          const validation = validateDistanceRules(incomingRules, targetMaxDistance, targetDeliveryFeeBase);
+          settings.distanceBasedPricing = {
+            enabled: false,
+            rules: validation.valid ? validation.normalizedRules : (settings.distanceBasedPricing?.rules || []),
+          };
+        } else {
+          settings.distanceBasedPricing = {
+            enabled: false,
+            rules: settings.distanceBasedPricing?.rules || [],
+          };
+        }
+      }
+    } else if (rawUpdates.maxDeliveryDistanceKm !== undefined && settings.distanceBasedPricing?.enabled) {
+      // If max radius was modified while distance pricing was already enabled without passing new rules,
+      // verify that active rules still cover up to the new max radius!
+      const activeRules = settings.distanceBasedPricing.rules || [];
+      const validation = validateDistanceRules(activeRules, targetMaxDistance, targetDeliveryFeeBase);
+      if (!validation.valid) {
+        return res.status(400).json({
+          success: false,
+          requestId: req.id,
+          code: 'INVALID_DISTANCE_PRICING_CONFIG',
+          error: 'INVALID_DISTANCE_PRICING_CONFIG',
+          message: `Cannot change maximum delivery radius to ${targetMaxDistance} km: ${validation.errors[0]}`,
+          errors: validation.errors,
+        });
+      }
+    }
+
     await settings.save();
 
     // Synchronize to active delivery zones if min order, free delivery or window updated
@@ -1462,6 +1615,7 @@ export async function updateStoreSettings(req, res, next) {
       },
       isOpen: settings.isOpen,
       announcementNotice: settings.announcementNotice,
+      distanceBasedPricing: settings.distanceBasedPricing,
     });
 
     await AuditLog.create({
@@ -1474,6 +1628,7 @@ export async function updateStoreSettings(req, res, next) {
         updatedFields: Object.keys(rawUpdates),
         paymentSettings: settings.paymentSettings,
         notificationSettings: settings.notificationSettings,
+        distanceBasedPricing: settings.distanceBasedPricing,
       },
       ipAddress: req.ip || '',
       requestId: req.id,
@@ -2071,11 +2226,11 @@ export async function bulkAdjustStock(req, res, next) {
         await InventoryMovement.create({
           product: product._id,
           sku,
-          change: quantityChange,
-          type: quantityChange >= 0 ? 'RESTOCK' : 'ADJUSTMENT',
+          type: quantityChange >= 0 ? 'ADMIN_RESTOCK' : 'MANUAL_AUDIT_ADJUSTMENT',
+          quantityDelta: quantityChange,
           previousStock,
           newStock,
-          reason: reason.trim(),
+          reason: reason?.trim() || 'Bulk stock update via Admin Dashboard',
           performedBy: req.user._id,
         });
 
